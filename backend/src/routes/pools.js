@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('[GET /pools]', err.message);
-    res.status(502).json({ error: 'Erro ao buscar pools do Uniswap. Tente novamente em instantes.' });
+    res.status(502).json({ error: 'Erro ao buscar pools. Tente novamente em instantes.' });
   }
 });
 

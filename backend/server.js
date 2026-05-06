@@ -124,7 +124,7 @@ const MOCK_POOLS = [
 
 app.get('/', (req, res) => {
   res.json({
-    message: 'Poll Yield Flow API online na porta 5000',
+    message: `FlowFi API online na porta ${PORT}`,
     version: '1.0.0',
     docs: `http://localhost:${PORT}/api/health`,
     endpoints: [
@@ -140,7 +140,7 @@ app.get('/', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    app: 'Poll Yield Flow',
+    app: 'FlowFi',
     port: PORT,
     timestamp: new Date().toISOString(),
     services: { api: 'online', mock: 'ativo' },
@@ -668,7 +668,7 @@ app.get('/api/swap/quote', async (req, res) => {
 
 app.get('/api/auth/nonce/:walletAddress', (req, res) => {
   const nonce = Math.floor(Math.random() * 1_000_000).toString();
-  res.json({ nonce, message: `Assine esta mensagem para autenticar no Poll Yield Flow.\nNonce: ${nonce}` });
+  res.json({ nonce, message: `Assine esta mensagem para autenticar no FlowFi.\nNonce: ${nonce}` });
 });
 
 app.post('/api/auth/verify', (req, res) => {
@@ -703,7 +703,7 @@ app.use((err, req, res, next) => {
 // ─── Start ────────────────────────────────────────────────────────────────────
 
 const server = app.listen(PORT, () => {
-  console.log(`\n  Poll Yield Flow API rodando em http://localhost:${PORT}`);
+  console.log(`\n  FlowFi API rodando em http://localhost:${PORT}`);
   console.log(`   Frontend esperado em : ${FRONTEND_URL}`);
   console.log(`   Banco de dados       : ${process.env.DATABASE_URL ? 'configurado' : 'nao configurado (usando mocks)'}`);
   console.log(`   Rede padrão          : Base (chainId ${DEFAULT_CHAIN_ID})`);
