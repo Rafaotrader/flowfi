@@ -1,0 +1,22 @@
+{
+  "name": "poll-yield-flow-contracts",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "compile":        "hardhat compile",
+    "clean":          "hardhat clean",
+    "deploy:base":    "hardhat run scripts/deploy-base.js --network base",
+    "deploy:sepolia": "hardhat run scripts/deploy-base.js --network sepolia",
+    "verify:base":    "hardhat verify --network base",
+    "test":           "hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.22.0",
+    "dotenv": "^16.4.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.9.6",
+    "@uniswap/v3-periphery": "^1.4.4"
+  }
+}
