@@ -7,7 +7,7 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata = {
   title: 'FlowFi — Liquidity made simple.',
-  description: 'Seu dinheiro trabalhando em pools DeFi. Rankings de pools Uniswap V3 em tempo real, simulador de retorno, swap e gestão completa de posições.',
+  description: 'Seu dinheiro trabalhando em pools DeFi. Rankings de pools em tempo real, simulador de retorno, swap integrado e gestão completa de posições.',
 };
 
 export default function RootLayout({ children }) {

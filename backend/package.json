@@ -1,7 +1,7 @@
 {
-  "name": "poll-yield-flow-backend",
+  "name": "flowfi-backend",
   "version": "1.0.0",
-  "description": "Poll Yield Flow — API backend para análise de pools Uniswap V3",
+  "description": "FlowFi — API backend para análise de pools DeFi",
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",

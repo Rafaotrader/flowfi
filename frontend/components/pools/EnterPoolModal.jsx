@@ -542,7 +542,7 @@ export default function EnterPoolModal(props) {
               <span className="gradient-text">{symbol0}/{symbol1}</span>
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Criando posição real na Uniswap V3 · {pool?.feeTierLabel || pool?.feeTier || '0.05%'} · {pool?.networkName || 'Base'}
+              Posição de liquidez · {pool?.feeTierLabel || pool?.feeTier || '0.05%'} · {pool?.networkName || 'Base'}
             </p>
           </div>
           <button

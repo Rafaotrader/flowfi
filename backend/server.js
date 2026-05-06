@@ -29,9 +29,14 @@ const ALLOWED_ORIGINS = [
   'http://localhost:6000',
 ];
 
+// Accept Vercel preview and production deployments automatically
+const VERCEL_ORIGIN = /^https:\/\/[\w-]+(\.vercel\.app)$/;
+
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    if (!origin) return cb(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    if (VERCEL_ORIGIN.test(origin)) return cb(null, true);
     cb(new Error(`CORS bloqueado para origem: ${origin}`));
   },
   credentials: true,

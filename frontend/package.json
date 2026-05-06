@@ -1,11 +1,11 @@
 {
-  "name": "poll-yield-flow-frontend",
+  "name": "flowfi-frontend",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 5173",
     "build": "next build",
-    "start": "next start -p 5173"
+    "start": "next start"
   },
   "dependencies": {
     "next": "^14.2.15",

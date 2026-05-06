@@ -389,7 +389,7 @@ export default function DashboardPage() {
           {
             icon: '🔒',
             title: 'Segurança',
-            body: 'Não custódia — seus fundos ficam na sua carteira. Operamos via contratos auditados da Uniswap V3.',
+            body: 'Não custódia — seus fundos ficam na sua carteira. Operamos via contratos auditados e verificados publicamente.',
           },
         ].map(({ icon, title, body }) => (
           <div key={title} className="panel space-y-2">
