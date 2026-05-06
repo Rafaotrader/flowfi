@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 
 async function fetchAdmin(path, secret) {
   const res = await fetch(`${API}${path}`, { headers: { 'x-admin-secret': secret } });
