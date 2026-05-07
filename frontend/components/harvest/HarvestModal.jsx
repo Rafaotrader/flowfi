@@ -87,7 +87,7 @@ export default function HarvestModal({ position, onClose, onSuccess }) {
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-800">
           <h3 className="font-semibold text-lg">
-            Preview do Saque via FlowFi — {position.token0_symbol}/{position.token1_symbol}
+            Preview do Saque via Flowfy — {position.token0_symbol}/{position.token1_symbol}
           </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white">✕</button>
         </div>

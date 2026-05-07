@@ -1,7 +1,7 @@
 /**
- * Single source of truth for FlowFi platform fee logic.
+ * Single source of truth for Flowfy platform fee logic.
  * Fixed rate: 5% on fees/profit only — never on principal capital.
- * Mirrors PLATFORM_FEE_BPS = 500 in FlowFiHarvester.sol.
+ * Mirrors PLATFORM_FEE_BPS = 500 in FlowfyHarvester.sol.
  */
 
 export function getFeeRate() {

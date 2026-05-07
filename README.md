@@ -1,8 +1,8 @@
-# FlowFi
+# Flowfy
 
 **Liquidity made simple.**
 
-FlowFi é uma interface DeFi para encontrar pools de liquidez, simular rendimento, criar posições, acompanhar taxas acumuladas e gerenciar liquidez em redes de baixo custo como Base.
+Flowfy é uma interface DeFi para encontrar pools de liquidez, simular rendimento, criar posições, acompanhar taxas acumuladas e gerenciar liquidez em redes de baixo custo como Base.
 
 ---
 
@@ -72,7 +72,7 @@ Copie `frontend/.env.example` para `frontend/.env.local` e preencha:
 | `NEXT_PUBLIC_CHAIN_ID` | Chain ID padrão (8453 = Base) |
 | `NEXT_PUBLIC_ZEROX_API_KEY` | Chave 0x para cotações de swap |
 | `NEXT_PUBLIC_PLATFORM_WALLET` | Carteira que recebe a taxa da plataforma |
-| `NEXT_PUBLIC_HARVESTER_ADDRESS` | Endereço do contrato FlowFiHarvester após deploy |
+| `NEXT_PUBLIC_HARVESTER_ADDRESS` | Endereço do contrato FlowfyHarvester após deploy |
 
 ---
 
@@ -90,7 +90,7 @@ O frontend funciona sem backend — pools serão mostradas via dados mock até q
 
 ## Contrato
 
-O `FlowFiHarvester.sol` gerencia coleta de fees via Uniswap V3 Position Manager.
+O `FlowfyHarvester.sol` gerencia coleta de fees via Uniswap V3 Position Manager.
 
 - Taxa da plataforma: **5% sobre fees sacadas** (nunca sobre capital)
 - Deploy na Base via Hardhat: `npx hardhat run scripts/deploy-base.js --network base`

@@ -1,90 +1,146 @@
 'use client';
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+const PLATFORM_WALLET   = '0xb7516B25F52Ea4Cf3711D6fa83F844756209c07d';
+const BASESCAN_WALLET   = `https://basescan.org/address/${PLATFORM_WALLET}`;
+const BASESCAN_TXLIST   = `https://basescan.org/address/${PLATFORM_WALLET}#tokentxns`;
 
-async function fetchAdmin(path, secret) {
-  const res = await fetch(`${API}${path}`, { headers: { 'x-admin-secret': secret } });
-  if (!res.ok) throw new Error('Acesso negado');
-  return res.json();
+const BASE_RPCS = [
+  'https://mainnet.base.org',
+  'https://base.llamarpc.com',
+  'https://base-rpc.publicnode.com',
+];
+
+async function fetchEthBalance(address) {
+  for (const rpc of BASE_RPCS) {
+    try {
+      const res = await fetch(rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [address, 'latest'] }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const { result } = await res.json();
+      if (result) return Number(BigInt(result)) / 1e18;
+    } catch {}
+  }
+  return null;
+}
+
+function fmt(n, dec = 6) {
+  if (n == null) return '—';
+  if (n === 0) return '0';
+  return n.toFixed(dec).replace(/\.?0+$/, '');
+}
+
+function AddrBadge({ addr }) {
+  return (
+    <a href={BASESCAN_WALLET} target="_blank" rel="noopener noreferrer"
+       className="font-mono text-xs text-violet-400 hover:text-violet-300 hover:underline break-all">
+      {addr}
+    </a>
+  );
+}
+
+function StatusRow({ label, status, note }) {
+  const cls = status === 'real'    ? 'badge-success'
+    : status === 'visual' ? 'badge-warning'
+    : 'badge-neutral';
+  const txt = status === 'real' ? '✓ On-chain' : status === 'visual' ? '⚠ Visual only' : status;
+  return (
+    <div className="flex items-start gap-3 py-3 border-b border-white/[0.05] last:border-0">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-white font-medium">{label}</p>
+        {note && <p className="text-xs text-slate-500 mt-0.5">{note}</p>}
+      </div>
+      <span className={cls}>{txt}</span>
+    </div>
+  );
 }
 
 export default function AdminPage() {
-  const [secret, setSecret] = useState('');
-  const [authed, setAuthed] = useState(false);
-  const [metrics, setMetrics] = useState(null);
-  const [dailyRevenue, setDailyRevenue] = useState([]);
-  const [error, setError] = useState(null);
+  const [ethBalance, setEthBalance] = useState(null);
+  const [balLoading, setBalLoading] = useState(true);
 
-  async function load(s) {
-    try {
-      const [m, r] = await Promise.all([
-        fetchAdmin('/api/admin/metrics', s),
-        fetchAdmin('/api/admin/revenue/daily?days=30', s),
-      ]);
-      setMetrics(m);
-      setDailyRevenue(r.revenue);
-      setAuthed(true);
-    } catch {
-      setError('Segredo inválido');
-    }
-  }
-
-  if (!authed) {
-    return (
-      <div className="max-w-sm mx-auto mt-20">
-        <div className="card space-y-4">
-          <h2 className="font-semibold">Acesso Admin</h2>
-          <input
-            type="password"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            placeholder="Admin secret"
-            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white"
-          />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
-          <button onClick={() => load(secret)} className="btn-primary w-full">Entrar</button>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    fetchEthBalance(PLATFORM_WALLET)
+      .then(b => setEthBalance(b))
+      .finally(() => setBalLoading(false));
+  }, []);
 
   return (
-    <div className="space-y-8">
-      <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
+    <div className="max-w-3xl mx-auto space-y-8 animate-fade-in py-6">
+      <div>
+        <h1 className="text-3xl font-bold text-white">Admin &mdash; Flowfy</h1>
+        <p className="text-slate-500 text-sm mt-1">Dados on-chain em tempo real. Sem banco de dados.</p>
+      </div>
 
-      {metrics && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      <div className="card space-y-4">
+        <h2 className="heading-section">Carteira da plataforma</h2>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="space-y-1">
+              <p className="stat-label">Endere&ccedil;o (Base)</p>
+              <AddrBadge addr={PLATFORM_WALLET} />
+            </div>
+            <div className="text-right">
+              <p className="stat-label">Saldo ETH (Base)</p>
+              {balLoading
+                ? <div className="skeleton-shimmer h-7 w-24 rounded-xl mt-1" />
+                : <p className="text-2xl font-bold text-white tabular-nums">{ethBalance != null ? `${fmt(ethBalance, 6)} ETH` : '—'}</p>}
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap pt-1">
+            <a href={BASESCAN_WALLET} target="_blank" rel="noopener noreferrer" className="btn-outline text-xs px-3 py-1.5">Ver no Basescan</a>
+            <a href={BASESCAN_TXLIST} target="_blank" rel="noopener noreferrer" className="btn-outline text-xs px-3 py-1.5">Transa&ccedil;&otilde;es de tokens</a>
+          </div>
+        </div>
+      </div>
+
+      <div className="card space-y-4">
+        <h2 className="heading-section">Estrutura de taxas</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[
-            { label: 'Total Usuários', value: metrics.total_users },
-            { label: 'Posições Ativas', value: metrics.active_positions },
-            { label: 'Receita Total', value: `$${parseFloat(metrics.total_revenue_usd || 0).toFixed(2)}` },
-            { label: 'Receita Hoje', value: `$${parseFloat(metrics.revenue_today_usd || 0).toFixed(2)}` },
-            { label: 'Receita Este Mês', value: `$${parseFloat(metrics.revenue_month_usd || 0).toFixed(2)}` },
-            { label: 'Total Harvests', value: metrics.total_harvests },
-          ].map((stat) => (
-            <div key={stat.label} className="card text-center">
-              <p className="stat-label">{stat.label}</p>
-              <p className="stat-value mt-1">{stat.value}</p>
+            { label: 'Harvest &le; $500', val: '5%',  color: 'text-emerald-400' },
+            { label: 'Harvest &gt; $500', val: '10%', color: 'text-emerald-400' },
+            { label: 'Swap',              val: '0.5%', color: 'text-violet-400'  },
+          ].map(({ label, val, color }) => (
+            <div key={label} className="panel text-center space-y-1">
+              <p className="stat-label" dangerouslySetInnerHTML={{ __html: label }} />
+              <p className={`text-2xl font-bold tabular-nums ${color}`}>{val}</p>
             </div>
           ))}
         </div>
-      )}
+      </div>
 
-      {dailyRevenue.length > 0 && (
-        <div className="card">
-          <h3 className="font-semibold mb-4">Receita Diária (últimos 30 dias)</h3>
-          <div className="space-y-2 max-h-80 overflow-y-auto">
-            {dailyRevenue.map((day) => (
-              <div key={day.date} className="flex justify-between items-center py-2 border-b border-gray-800 text-sm">
-                <span className="text-gray-400">{new Date(day.date).toLocaleDateString('pt-BR')}</span>
-                <span className="text-white font-medium">${parseFloat(day.revenue_usd || 0).toFixed(2)}</span>
-                <span className="text-gray-500">{day.harvest_count} harvests</span>
-              </div>
-            ))}
+      <div className="card space-y-1">
+        <h2 className="heading-section mb-3">Status de envio on-chain</h2>
+        <StatusRow label="Swap 0.5% — feeRecipient na 0x calldata" status="real" note="Parâmetros feeRecipient + buyTokenPercentageFee enviados à 0x API. Taxa descontada do buyAmount dentro do tx calldata." />
+        <StatusRow label="Sacar lucro — Harvester contract" status="real" note="HarvestModal executa harvestWithFee() no contrato Harvester. Split on-chain automático." />
+        <StatusRow label="Finalizar posição" status="visual" note="decreaseLiquidity + collect retorna 100% ao usuário. Sem taxa de saída de capital." />
+      </div>
+
+      <div className="card space-y-3">
+        <h2 className="heading-section">Endereços de contrato</h2>
+        {[
+          { label: 'Harvester (Base)', addr: '0xD5c8C24dC133D3eC2C511B91738E9214709F804B' },
+          { label: 'Uniswap V3 Position Manager (Base)', addr: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1' },
+        ].map(({ label, addr }) => (
+          <div key={addr} className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-sm text-slate-400">{label}</p>
+            <a href={`https://basescan.org/address/${addr}`} target="_blank" rel="noopener noreferrer"
+               className="font-mono text-xs text-violet-400 hover:underline">
+              {addr.slice(0, 10)}&hellip;{addr.slice(-8)}
+            </a>
           </div>
-        </div>
-      )}
+        ))}
+      </div>
+
+      <div className="text-center">
+        <button onClick={() => { setBalLoading(true); fetchEthBalance(PLATFORM_WALLET).then(setEthBalance).finally(() => setBalLoading(false)); }} className="btn-outline text-sm">
+          &#8635; Atualizar saldo
+        </button>
+      </div>
     </div>
   );
 }

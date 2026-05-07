@@ -420,7 +420,7 @@ export default function PositionsPage() {
                 value={
                   totalInvestedUSD > 0
                     ? <span className="text-white font-bold text-base">{fmtUSD(totalInvestedUSD)}</span>
-                    : <span className="text-slate-600 text-xs leading-snug">Crie posições via FlowFi para rastrear</span>
+                    : <span className="text-slate-600 text-xs leading-snug">Crie posições via Flowfy para rastrear</span>
                 }
                 sub={totalInvestedUSD > 0 ? 'via mints rastreados' : ''}
               />
@@ -583,7 +583,7 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
         <MetricBox
           label="Investido"
           value={investedUSD != null ? fmtUSD(investedUSD) : <span className="text-slate-600 text-xs">—</span>}
-          sub={investedUSD != null ? 'via FlowFi' : 'não rastreado'}
+          sub={investedUSD != null ? 'via Flowfy' : 'não rastreado'}
         />
         <MetricBox
           label="Valor na pool"

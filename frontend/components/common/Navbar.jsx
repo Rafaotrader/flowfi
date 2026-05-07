@@ -13,8 +13,8 @@ const NAV_LINKS = [
   { href: '/positions', label: 'Posições'  },
 ];
 
-const FLOWFI_URL = 'https://flowfi-neon.vercel.app';
-const METAMASK_DEEPLINK = `https://metamask.app.link/dapp/flowfi-neon.vercel.app`;
+const FLOWFI_URL = 'https://flowfy-neon.vercel.app';
+const METAMASK_DEEPLINK = `https://metamask.app.link/dapp/flowfy-neon.vercel.app`;
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -81,7 +81,7 @@ export default function Navbar() {
                 <path d="M7 4L10 5.75V8.25L7 10L4 8.25V5.75L7 4Z" fill="white" fillOpacity="0.4"/>
               </svg>
             </div>
-            <span className="font-bold text-white text-[15px] tracking-tight">FlowFi</span>
+            <span className="font-bold text-white text-[15px] tracking-tight">Flowfy</span>
             <span className="text-[10px] font-semibold bg-violet-950/80 text-violet-400 border border-violet-800/60 rounded px-1.5 py-0.5 hidden sm:inline leading-none">
               BETA
             </span>
@@ -299,7 +299,7 @@ export default function Navbar() {
                     <path d="M7 1L13 4.5V9.5L7 13L1 9.5V4.5L7 1Z" fill="white" fillOpacity="0.9"/>
                   </svg>
                 </div>
-                <span className="font-bold text-white text-[14px]">FlowFi</span>
+                <span className="font-bold text-white text-[14px]">Flowfy</span>
               </div>
               <button
                 onClick={() => setMobileOpen(false)}

@@ -124,7 +124,7 @@ const MOCK_POOLS = [
 
 app.get('/', (req, res) => {
   res.json({
-    message: `FlowFi API online na porta ${PORT}`,
+    message: `Flowfy API online na porta ${PORT}`,
     version: '1.0.0',
     docs: `http://localhost:${PORT}/api/health`,
     endpoints: [
@@ -140,7 +140,7 @@ app.get('/', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    app: 'FlowFi',
+    app: 'Flowfy',
     port: PORT,
     timestamp: new Date().toISOString(),
     services: { api: 'online', mock: 'ativo' },
@@ -668,7 +668,7 @@ app.get('/api/swap/quote', async (req, res) => {
 
 app.get('/api/auth/nonce/:walletAddress', (req, res) => {
   const nonce = Math.floor(Math.random() * 1_000_000).toString();
-  res.json({ nonce, message: `Assine esta mensagem para autenticar no FlowFi.\nNonce: ${nonce}` });
+  res.json({ nonce, message: `Assine esta mensagem para autenticar no Flowfy.\nNonce: ${nonce}` });
 });
 
 app.post('/api/auth/verify', (req, res) => {
@@ -704,7 +704,7 @@ app.use((err, req, res, next) => {
 
 if (require.main === module) {
   const server = app.listen(PORT, () => {
-    console.log(`\n  FlowFi API rodando em http://localhost:${PORT}`);
+    console.log(`\n  Flowfy API rodando em http://localhost:${PORT}`);
     console.log(`   Frontend esperado em : ${FRONTEND_URL}`);
     console.log(`   Banco de dados       : ${process.env.DATABASE_URL ? 'configurado' : 'nao configurado (usando mocks)'}`);
     console.log(`   Rede padrão          : Base (chainId ${DEFAULT_CHAIN_ID})`);

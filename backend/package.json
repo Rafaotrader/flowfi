@@ -1,7 +1,7 @@
 {
-  "name": "flowfi-backend",
+  "name": "flowfy-backend",
   "version": "1.0.0",
-  "description": "FlowFi — API backend para análise de pools DeFi",
+  "description": "Flowfy — API backend para análise de pools DeFi",
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",

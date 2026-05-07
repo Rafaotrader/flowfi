@@ -6,7 +6,7 @@ import WalletProvider from '../components/common/WalletProvider';
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata = {
-  title: 'FlowFi — Liquidity made simple.',
+  title: 'Flowfy — Liquidity made simple.',
   description: 'Seu dinheiro trabalhando em pools DeFi. Rankings de pools em tempo real, simulador de retorno, swap integrado e gestão completa de posições.',
 };
 
