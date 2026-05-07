@@ -700,30 +700,32 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
+// ─── Start (standalone only — skipped when imported by Vercel/serverless) ─────
 
-const server = app.listen(PORT, () => {
-  console.log(`\n  FlowFi API rodando em http://localhost:${PORT}`);
-  console.log(`   Frontend esperado em : ${FRONTEND_URL}`);
-  console.log(`   Banco de dados       : ${process.env.DATABASE_URL ? 'configurado' : 'nao configurado (usando mocks)'}`);
-  console.log(`   Rede padrão          : Base (chainId ${DEFAULT_CHAIN_ID})`);
-  console.log(`   Platform wallet      : ${process.env.PLATFORM_WALLET || 'não configurada'}`);
-  console.log(`   Endpoints            : GET /api/health | GET /api/pools/top?chainId=8453 | POST /api/calculate\n`);
-});
+if (require.main === module) {
+  const server = app.listen(PORT, () => {
+    console.log(`\n  FlowFi API rodando em http://localhost:${PORT}`);
+    console.log(`   Frontend esperado em : ${FRONTEND_URL}`);
+    console.log(`   Banco de dados       : ${process.env.DATABASE_URL ? 'configurado' : 'nao configurado (usando mocks)'}`);
+    console.log(`   Rede padrão          : Base (chainId ${DEFAULT_CHAIN_ID})`);
+    console.log(`   Platform wallet      : ${process.env.PLATFORM_WALLET || 'não configurada'}`);
+    console.log(`   Endpoints            : GET /api/health | GET /api/pools/top?chainId=8453 | POST /api/calculate\n`);
+  });
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n  ERRO: Porta ${PORT} ja esta em uso!`);
-    console.error(`   Para liberar no Windows:`);
-    console.error(`     netstat -ano | findstr :${PORT}`);
-    console.error(`     taskkill /PID <PID> /F`);
-    console.error(`   Ou: PORT=5001 npm run dev\n`);
-    process.exit(1);
-  } else {
-    console.error('Erro ao iniciar servidor:', err.message);
-    process.exit(1);
-  }
-});
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ERRO: Porta ${PORT} ja esta em uso!`);
+      console.error(`   Para liberar no Windows:`);
+      console.error(`     netstat -ano | findstr :${PORT}`);
+      console.error(`     taskkill /PID <PID> /F`);
+      console.error(`   Ou: PORT=5001 npm run dev\n`);
+      process.exit(1);
+    } else {
+      console.error('Erro ao iniciar servidor:', err.message);
+      process.exit(1);
+    }
+  });
+}
 
 module.exports = app;
 
