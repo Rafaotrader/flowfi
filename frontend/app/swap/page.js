@@ -117,6 +117,43 @@ function parseSwapError(err) {
   return raw.length > 160 ? raw.slice(0, 160) + '…' : raw;
 }
 
+const COINGECKO_IDS = {
+  ETH: 'ethereum', WETH: 'weth', cbBTC: 'coinbase-wrapped-bitcoin',
+  WBTC: 'wrapped-bitcoin', cbETH: 'coinbase-wrapped-staked-eth',
+  ARB: 'arbitrum', OP: 'optimism', MATIC: 'matic-network', BNB: 'binancecoin',
+};
+const STABLES_SET = new Set(['USDC', 'USDT', 'DAI', 'USDbC', 'FRAX', 'BUSD']);
+
+async function getSwapEstimate(sellToken, buyToken, sellAmtHuman) {
+  const fetchPrice = async (symbol) => {
+    if (STABLES_SET.has(symbol)) return 1;
+    const id = COINGECKO_IDS[symbol];
+    if (!id) throw new Error(`Preço desconhecido para ${symbol}`);
+    const res = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd`,
+      { signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+    const d = await res.json();
+    const price = d[id]?.usd;
+    if (!price) throw new Error(`Preço indisponível para ${symbol}`);
+    return price;
+  };
+  const [priceIn, priceOut] = await Promise.all([fetchPrice(sellToken.symbol), fetchPrice(buyToken.symbol)]);
+  const usdValue = sellAmtHuman * priceIn;
+  const estimatedOut = (usdValue / priceOut) * 0.995;
+  const amtOutRaw = Math.floor(estimatedOut * Math.pow(10, buyToken.decimals));
+  const amtOutStr = String(Math.max(0, amtOutRaw));
+  return {
+    isEstimated: true, _source: 'estimate',
+    buyAmount: amtOutStr,
+    sellAmount: String(Math.floor(sellAmtHuman * Math.pow(10, sellToken.decimals))),
+    grossBuyAmount: amtOutStr, netBuyAmountEstimated: amtOutStr,
+    estimatedGas: null, platformFeeEstimated: '0',
+    sources: [{ name: 'CoinGecko (estimativa)', proportion: '1' }],
+  };
+}
+
 // Traduz erros de cotação para mensagem amigável
 function parseQuoteError(msg) {
   const m = (msg || '').toLowerCase();
@@ -197,17 +234,21 @@ export default function SwapPage() {
     if (sellAmountWei === 0n) return;
     setLoading(true);
     setError(null);
+    console.group('[Flowfy Swap] fetchQuote');
+    console.log('Tokens:', sell.symbol, '→', buy.symbol, '| Amount:', sellAmt, '| Chain:', chainId || 8453);
     try {
-      const qty    = parseFloat(sellAmt) || 0;
-      const sym    = sell.symbol.toUpperCase();
+      const qty         = parseFloat(sellAmt) || 0;
+      const sym         = sell.symbol.toUpperCase();
       const tradeUsdEst = (sym === 'USDC' || sym === 'USDT') ? qty
-        : (sym === 'ETH' || sym === 'WETH') ? qty * 3000
-        : 0;
+        : (sym === 'ETH' || sym === 'WETH') ? qty * 3000 : 0;
       const excludedSources = tradeUsdEst > 0 && tradeUsdEst < 20
         ? 'Uniswap_V2,Curve,Balancer_V2' : undefined;
 
       let data;
+
+      // Tier 1: 0x backend
       try {
+        console.log('[Tier 1] Tentando 0x backend…');
         data = await getSwapQuote({
           chainId: chainId || 8453,
           sellToken: sell.address,
@@ -216,16 +257,39 @@ export default function SwapPage() {
           ...(address && { takerAddress: address }),
           ...(excludedSources && { excludedSources }),
         });
-      } catch {
-        // Backend unavailable → fall back to Uniswap V3 QuoterV2 on-chain (no API key needed)
-        data = await getUniswapV3Quote(sell.address, buy.address, sellAmountWei.toString(), chainId || 8453);
+        data._source = '0x';
+        console.log('[Tier 1] ✓ 0x OK | buyAmount:', data.buyAmount);
+      } catch (e0x) {
+        console.warn('[Tier 1] ✗ 0x falhou:', e0x.message);
+
+        // Tier 2: Uniswap V3 QuoterV2 on-chain (no API key)
+        try {
+          console.log('[Tier 2] Tentando Uniswap V3 QuoterV2…');
+          data = await getUniswapV3Quote(sell.address, buy.address, sellAmountWei.toString(), chainId || 8453);
+          data._source = 'uniswap';
+          console.log('[Tier 2] ✓ UniV3 OK | buyAmount:', data.buyAmount, '| fee:', data.fee);
+        } catch (eUni) {
+          console.warn('[Tier 2] ✗ UniV3 falhou:', eUni.message);
+
+          // Tier 3: CoinGecko price estimation (non-executable)
+          try {
+            console.log('[Tier 3] Tentando estimativa CoinGecko…');
+            data = await getSwapEstimate(sell, buy, qty);
+            console.log('[Tier 3] ✓ CoinGecko OK | estimatedOut:', data.buyAmount);
+          } catch (eCG) {
+            console.error('[Tier 3] ✗ CoinGecko falhou:', eCG.message);
+            throw new Error('Nenhuma cotação disponível agora. Tente novamente em instantes.');
+          }
+        }
       }
+
       setQuote(data);
     } catch (err) {
       setError(err.message);
       setQuote(null);
     } finally {
       setLoading(false);
+      console.groupEnd();
     }
   }, [sellAmt, sell, buy, chainId, address]);
 
@@ -514,7 +578,7 @@ export default function SwapPage() {
     <div className="max-w-lg mx-auto space-y-6 py-4 animate-fade-in">
       <div>
         <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-violet-950/40 border border-violet-800/30 rounded-full text-xs text-violet-400 font-medium mb-3">
-          <span>⇅</span> {quote?.isUniswapDirect ? 'Uniswap V3 · Rota direta' : '0x Protocol · Melhor rota automática'}
+          <span>⇅</span> {quote?.isEstimated ? 'CoinGecko · Estimativa de preço' : quote?.isUniswapDirect ? 'Uniswap V3 · Rota direta' : '0x Protocol · Melhor rota automática'}
         </div>
         <h1 className="text-3xl font-bold text-white">Swap</h1>
         <p className="text-slate-500 mt-1.5 text-sm">
@@ -690,6 +754,20 @@ export default function SwapPage() {
           </div>
         )}
 
+        {/* Estimated quote warning — non-executable */}
+        {quote?.isEstimated && (
+          <div className="rounded-xl p-3 text-xs space-y-2 border bg-amber-950/30 border-amber-700/40 text-amber-300">
+            <p className="font-medium">⚠ Cotação estimada — não executável</p>
+            <p>Não foi possível obter cotação real via 0x ou Uniswap V3. O valor mostrado é uma estimativa baseada em preços de mercado e pode diferir do real.</p>
+            <button
+              onClick={() => { setError(null); fetchQuote(); }}
+              className="text-xs text-amber-200 font-medium underline"
+            >
+              Tentar cotação real
+            </button>
+          </div>
+        )}
+
         {/* Gas alto — aviso (3–10%), não bloqueia */}
         {gasInfo?.level === 'alto' && (
           <div className="rounded-xl p-3 text-xs space-y-1 border bg-amber-950/30 border-amber-800/40 text-amber-300">
@@ -822,6 +900,7 @@ export default function SwapPage() {
             onClick={executeSwap}
             disabled={
               !quote || loading || hasInsufficientBalance ||
+              quote?.isEstimated ||
               (gasInfo?.level === 'inviável' && !gasBlockOverride) ||
               txStep === 'approving' || txStep === 'signing' ||
               txStep === 'swapping'  || txStep === 'confirming' ||
@@ -834,6 +913,7 @@ export default function SwapPage() {
             ) : loading ? 'Buscando cotação…'
               : hasInsufficientBalance ? `Saldo insuficiente de ${sell.symbol}`
               : !quote ? 'Insira um valor para cotar'
+              : quote?.isEstimated ? 'Aguardando cotação executável'
               : gasInfo?.level === 'inviável' && !gasBlockOverride ? 'Operação não recomendada'
               : gasInfo?.level === 'alto' ? `Gas alto — Trocar ${sell.symbol} → ${buy.symbol}`
               : `Trocar agora — ${sell.symbol} → ${buy.symbol}`}

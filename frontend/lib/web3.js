@@ -793,6 +793,10 @@ export async function getUniswapV3Quote(tokenIn, tokenOut, amountIn, chainId = 8
 
   if (!quoterAddr || !resolvedIn || !resolvedOut) throw new Error('Rede não suportada pelo QuoterV2');
 
+  console.group('[QuoterV2] getUniswapV3Quote');
+  console.log('chain:', chainId, '| quoter:', quoterAddr);
+  console.log('tokenIn:', resolvedIn, '| tokenOut:', resolvedOut, '| amountIn:', amountIn);
+
   const feeTiers = [500, 3000, 10000, 100];
   let bestResult = null;
   for (const fee of feeTiers) {
@@ -809,14 +813,18 @@ export async function getUniswapV3Quote(tokenIn, tokenOut, amountIn, chainId = 8
       );
       // viem readContract: named multi-output → array; access by index or name
       const amountOut = (Array.isArray(result) ? result[0] : result?.amountOut) || 0n;
-      if (!amountOut || amountOut === 0n) continue;
+      if (!amountOut || amountOut === 0n) { console.log(`  fee ${fee}: amountOut=0 (skip)`); continue; }
+      console.log(`  fee ${fee}: amountOut=${amountOut}`);
       if (!bestResult || amountOut > bestResult.amountOut) {
         bestResult = { amountOut, fee };
       }
     } catch (e) {
-      console.warn(`[QuoterV2] fee ${fee} skipped:`, e?.message?.slice(0, 100));
+      console.warn(`  fee ${fee}: erro —`, e?.message?.slice(0, 100));
     }
   }
+
+  console.log('bestResult:', bestResult ? `fee=${bestResult.fee} out=${bestResult.amountOut}` : 'none');
+  console.groupEnd();
 
   if (!bestResult) throw new Error('Sem liquidez disponível para este par via Uniswap V3');
 
