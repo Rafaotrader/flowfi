@@ -6,12 +6,19 @@
   :root {
     --brand-rgb: 124 58 237;
     --emerald-rgb: 16 185 129;
+    /* Safe-area insets for iPhone notch/home bar */
+    --sat: env(safe-area-inset-top);
+    --sar: env(safe-area-inset-right);
+    --sab: env(safe-area-inset-bottom);
+    --sal: env(safe-area-inset-left);
   }
 
   body {
     background-color: #04040f;
     background-image: radial-gradient(ellipse 80% 50% at 50% -5%,
       rgba(124,58,237,0.14) 0%, transparent 60%);
+    /* Prevents horizontal scroll on mobile */
+    overflow-x: hidden;
   }
 
   html { scroll-behavior: smooth; }

@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 // Agregador multichain real
 let fetchTopPools, fetchPoolById, getTop20Global, getPoolsByChain;
@@ -41,7 +42,28 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '64kb' }));
+
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+
+const apiLimiter = rateLimit({
+  windowMs: 60_000,          // 1 minute
+  max: 120,                  // 120 req/min per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Tente novamente em 1 minuto.' },
+});
+
+const swapLimiter = rateLimit({
+  windowMs: 10_000,          // 10 seconds
+  max: 6,                    // 6 swap quotes / 10s
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitas cotações seguidas. Aguarde alguns segundos.' },
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/swap/', swapLimiter);
 
 // ─── Mock data (Ethereum) ─────────────────────────────────────────────────────
 
@@ -573,7 +595,23 @@ app.get('/api/swap/quote', async (req, res) => {
     return res.status(400).json({ error: 'Parâmetros obrigatórios: sellToken, buyToken, sellAmount' });
   }
 
+  // Input validation — prevent injection via URL params
+  const ETH_ADDR = /^0x[0-9a-fA-F]{40}$/;
+  const UINT_STR = /^\d{1,78}$/;
+  const SUPPORTED_CHAINS = new Set([1, 8453, 42161, 10, 137, 56]);
+
+  if (sellToken !== 'ETH' && !ETH_ADDR.test(sellToken))
+    return res.status(400).json({ error: 'sellToken inválido' });
+  if (buyToken !== 'ETH' && !ETH_ADDR.test(buyToken))
+    return res.status(400).json({ error: 'buyToken inválido' });
+  if (!UINT_STR.test(sellAmount))
+    return res.status(400).json({ error: 'sellAmount inválido' });
+  if (takerAddress && !ETH_ADDR.test(takerAddress))
+    return res.status(400).json({ error: 'takerAddress inválido' });
+
   const cid = parseInt(chainId) || 8453;
+  if (!SUPPORTED_CHAINS.has(cid))
+    return res.status(400).json({ error: `chainId ${cid} não suportado` });
 
   // v2: /price para preview (sem taker), /quote para execução (com taker)
   const endpoint = takerAddress ? '/swap/permit2/quote' : '/swap/permit2/price';

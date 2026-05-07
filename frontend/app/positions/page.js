@@ -58,6 +58,33 @@ function fmtHuman(n) {
   return n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+function fmtPct(n, decimals = 1) {
+  if (!Number.isFinite(n)) return '—';
+  const sign = n >= 0 ? '+' : '';
+  return `${sign}${n.toFixed(decimals)}%`;
+}
+
+// APR = (fees / invested) / days * 365 × 100  (annualised, from mint date)
+function calcAPR(feesUSD, investedUSD, createdAt) {
+  if (!feesUSD || !investedUSD || !createdAt || investedUSD <= 0) return null;
+  const days = (Date.now() - createdAt) / 86_400_000;
+  if (days < 0.05) return null; // avoid nonsensical APR in first hour
+  return (feesUSD / investedUSD / days) * 365 * 100;
+}
+
+// IL = LP_now / HODL_now - 1   (negative = loss vs holding)
+// Uses entry token amounts and current prices
+function calcIL(amount0Entry, amount1Entry, amount0Now, amount1Now, price0, price1) {
+  if (!price0 || !price1) return null;
+  const a0e = Number(amount0Entry) || 0;
+  const a1e = Number(amount1Entry) || 0;
+  if (a0e <= 0 && a1e <= 0) return null;
+  const hodl = a0e * price0 + a1e * price1;
+  if (hodl <= 0) return null;
+  const lp   = (amount0Now || 0) * price0 + (amount1Now || 0) * price1;
+  return (lp / hodl - 1) * 100; // percentage, negative = IL
+}
+
 function parseErr(err) {
   const msg = err.shortMessage || err.message || '';
   if (err.code === 4001 || msg.toLowerCase().includes('user rejected') || msg.toLowerCase().includes('user denied'))
@@ -170,13 +197,18 @@ export default function PositionsPage() {
         const f1USD = toUSD(fees1, pos.token1Symbol, fetchedPrices);
         const feesUSD = f0USD != null || f1USD != null ? (f0USD ?? 0) + (f1USD ?? 0) : null;
 
+        // Mint record for this position (APR + IL base)
+        const rec = mintRecords[pos.tokenId];
+
         if (!pos.hasLiquidity) {
+          const aprPct = rec?.investedUSD && rec?.createdAt
+            ? calcAPR(feesUSD ?? 0, Number(rec.investedUSD), rec.createdAt) : null;
           setPosValues(prev => ({
             ...prev,
             [pos.tokenId]: {
               loading: false, amount0: 0, amount1: 0, liqUSD: 0,
               fees0, fees1, fees0USD: f0USD, fees1USD: f1USD, feesUSD,
-              totalUSD: feesUSD ?? 0, inRange: false,
+              totalUSD: feesUSD ?? 0, inRange: false, aprPct,
             },
           }));
           continue;
@@ -198,12 +230,28 @@ export default function PositionsPage() {
               : feesUSD != null ? feesUSD
               : null;
 
+            // APR: annualised fee yield since position opened
+            const investedUSD = rec?.investedUSD ? Number(rec.investedUSD) : null;
+            const aprPct = feesUSD != null && investedUSD && rec?.createdAt
+              ? calcAPR(feesUSD, investedUSD, rec.createdAt) : null;
+
+            // Impermanent Loss: LP value vs HODL with entry amounts
+            const p0 = fetchedPrices[pos.token0Symbol];
+            const p1 = fetchedPrices[pos.token1Symbol];
+            const ilPct = !calcFailed && rec?.amount0 != null
+              ? calcIL(rec.amount0, rec.amount1, amount0, amount1, p0, p1) : null;
+
+            // ROI: total return vs invested capital
+            const roiPct = totalUSD != null && investedUSD
+              ? (totalUSD - investedUSD) / investedUSD * 100 : null;
+
             setPosValues(prev => ({
               ...prev,
               [pos.tokenId]: {
                 loading: false, amount0, amount1, liqUSD,
                 fees0, fees1, fees0USD: f0USD, fees1USD: f1USD, feesUSD,
                 totalUSD, inRange, priceKnown: liqUSD != null, calcFailed,
+                aprPct, ilPct, roiPct,
               },
             }));
           })
@@ -529,10 +577,14 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
   const totalUSD = pv?.totalUSD;
   const liqUSD   = pv?.liqUSD;
   const feesUSD  = pv?.feesUSD;
+  const aprPct   = pv?.aprPct;
+  const ilPct    = pv?.ilPct;
+  const roiPct   = pv?.roiPct;
 
   const investedUSD = localRecord?.investedUSD ? Number(localRecord.investedUSD) : null;
   const pnl = (totalUSD != null && investedUSD != null) ? totalUSD - investedUSD : null;
   const smallFeesWarning = feesUSD != null && feesUSD > 0 && feesUSD < 0.05;
+  const hasIL = ilPct != null && ilPct < -1; // only show if IL > 1%
 
   return (
     <div className={`card-hover space-y-4 transition-opacity ${isDone ? 'opacity-50' : ''}`}>
@@ -546,6 +598,11 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
               {inRange === true ? '● Em range' : inRange === false ? '⚠ Fora do range' : '● Ativa'}
             </span>
             {hasFees && <span className="badge-warning text-xs">Lucro disponível</span>}
+            {aprPct != null && (
+              <span className="badge-info text-xs">
+                {aprPct >= 100 ? `${aprPct.toFixed(0)}% APR` : `${aprPct.toFixed(1)}% APR`}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
             <span>NFT #{pos.tokenId}</span>
@@ -581,57 +638,84 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
       {/* ── Financial metrics ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <MetricBox
-          label="Investido"
+          label="Capital investido"
           value={investedUSD != null ? fmtUSD(investedUSD) : <span className="text-slate-600 text-xs">—</span>}
           sub={investedUSD != null ? 'via Flowfy' : 'não rastreado'}
         />
         <MetricBox
-          label="Valor na pool"
-          value={
-            pv?.loading ? <div className="skeleton-shimmer h-5 w-16 rounded" />
-            : liqUSD != null && liqUSD > 0 ? fmtUSD(liqUSD)
-            : <span className="text-slate-500 text-sm">Calculando…</span>
-          }
-          sub={
-            pv && !pv.loading && (pv.amount0 > 0 || pv.amount1 > 0)
-              ? `${fmtHuman(pv.amount0)} ${sym0} + ${fmtHuman(pv.amount1)} ${sym1}`
-              : 'liquidez ativa'
-          }
-        />
-        <MetricBox
-          label="Lucro acumulado"
+          label="Fees acumuladas"
           value={
             pv?.loading ? <div className="skeleton-shimmer h-5 w-16 rounded" />
             : feesUSD != null && feesUSD > 0 ? <span className="text-emerald-400 font-bold">{fmtUSD(feesUSD)}</span>
             : <span className="text-slate-600">$0</span>
           }
-          sub={`${fmtAmt(pos.tokensOwed0, pos.decimals0)} ${sym0} + ${fmtAmt(pos.tokensOwed1, pos.decimals1)} ${sym1}`}
+          sub={`${fmtAmt(pos.tokensOwed0, pos.decimals0)} ${sym0} · ${fmtAmt(pos.tokensOwed1, pos.decimals1)} ${sym1}`}
           highlighted={hasFees}
         />
         <MetricBox
-          label="Resultado"
+          label="APR (anualizado)"
           value={
-            pnl != null
-              ? <span className={pnl >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
-                  {pnl >= 0 ? '+' : ''}{fmtUSD(pnl)}
-                </span>
+            pv?.loading ? <div className="skeleton-shimmer h-5 w-14 rounded" />
+            : aprPct != null
+              ? <span className="text-violet-400 font-bold">{aprPct >= 999 ? '>999%' : `${aprPct.toFixed(1)}%`}</span>
               : <span className="text-slate-600 text-xs">—</span>
           }
-          sub={pnl != null ? (pnl >= 0 ? 'lucro estimado' : 'perda estimada') : 'sem dados de entrada'}
+          sub={aprPct != null ? 'baseado em fees / capital' : 'abra posição via Flowfy'}
+        />
+        <MetricBox
+          label="ROI / Resultado"
+          value={
+            pv?.loading ? <div className="skeleton-shimmer h-5 w-16 rounded" />
+            : roiPct != null
+              ? <span className={roiPct >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                  {fmtPct(roiPct)}
+                </span>
+              : pnl != null
+                ? <span className={pnl >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                    {pnl >= 0 ? '+' : ''}{fmtUSD(pnl)}
+                  </span>
+                : <span className="text-slate-600 text-xs">—</span>
+          }
+          sub={
+            roiPct != null ? `${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)} total`
+            : pnl != null ? (pnl >= 0 ? 'lucro estimado' : 'perda estimada')
+            : 'sem dados de entrada'
+          }
         />
       </div>
+
+      {/* ── Liquidity breakdown ── */}
+      {!pv?.loading && (pv?.amount0 > 0 || pv?.amount1 > 0) && (
+        <div className="flex items-center gap-3 text-xs text-slate-500 bg-white/[0.02] border border-white/[0.04] rounded-xl px-3 py-2">
+          <span className="text-slate-600">Capital em pool:</span>
+          <span className="text-white font-medium tabular-nums">
+            {fmtHuman(pv.amount0)} {sym0} · {fmtHuman(pv.amount1)} {sym1}
+          </span>
+          {liqUSD != null && liqUSD > 0 && (
+            <span className="ml-auto text-slate-400 font-semibold">{fmtUSD(liqUSD)}</span>
+          )}
+        </div>
+      )}
 
       {/* ── Tips ── */}
       {inRange === false && (
         <div className="flex items-start gap-2 text-xs text-amber-400/80 bg-amber-950/20 border border-amber-900/20 rounded-xl px-3 py-2.5">
           <span className="shrink-0">⚠</span>
-          <span>Sua posição está fora do range e não está gerando taxas agora. Considere retirar liquidez e criar uma nova posição no range atual.</span>
+          <span>Posição fora do range — não está gerando taxas. Considere finalizar e reabrir no range atual.</span>
+        </div>
+      )}
+      {hasIL && (
+        <div className="flex items-start gap-2 text-xs text-orange-400/80 bg-orange-950/20 border border-orange-900/20 rounded-xl px-3 py-2.5">
+          <span className="shrink-0">📉</span>
+          <span>
+            Perda impermanente estimada: <strong className="text-orange-400">{fmtPct(ilPct)}</strong> em relação a manter os tokens. As fees acumuladas podem compensar este valor.
+          </span>
         </div>
       )}
       {smallFeesWarning && (
         <div className="flex items-start gap-2 text-xs text-slate-500 bg-white/[0.02] border border-white/[0.04] rounded-xl px-3 py-2">
           <span className="shrink-0">⛽</span>
-          <span>Lucro menor que $0.05 pode não compensar o custo de gas.</span>
+          <span>Fees abaixo de $0.05 podem não compensar o custo de gas da coleta.</span>
         </div>
       )}
 

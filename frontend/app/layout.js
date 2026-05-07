@@ -10,13 +10,19 @@ export const metadata = {
   description: 'Seu dinheiro trabalhando em pools DeFi. Rankings de pools em tempo real, simulador de retorno, swap integrado e gestão completa de posições.',
 };
 
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
+
 export default function RootLayout({ children }) {
   return (
     <html lang="pt-BR" className="dark">
       <body className={`${inter.variable} font-[var(--font-inter)] text-slate-100 min-h-screen antialiased`}>
         <WalletProvider>
           <Navbar />
-          <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+          <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-safe">
             {children}
           </main>
         </WalletProvider>

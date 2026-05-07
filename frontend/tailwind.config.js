@@ -37,6 +37,9 @@ module.exports = {
         'gradient-card':    'linear-gradient(135deg, rgba(124,58,237,0.05) 0%, transparent 100%)',
         'gradient-emerald': 'linear-gradient(135deg, rgba(16,185,129,0.1) 0%, transparent 100%)',
       },
+      padding: {
+        'safe': 'env(safe-area-inset-bottom, 0px)',
+      },
       animation: {
         'shimmer':    'shimmer 1.8s ease-in-out infinite',
         'glow-pulse': 'glowPulse 2s ease-in-out infinite',
