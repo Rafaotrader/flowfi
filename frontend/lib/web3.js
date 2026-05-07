@@ -141,6 +141,37 @@ const FACTORY_ABI = [
   { name: 'getPool', inputs: [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }], outputs: [{ type: 'address' }], stateMutability: 'view', type: 'function' },
 ];
 
+const QUOTER_V2_ABI = [{
+  name: 'quoteExactInputSingle', type: 'function', stateMutability: 'nonpayable',
+  inputs: [{ name: 'params', type: 'tuple', components: [
+    { name: 'tokenIn',           type: 'address' },
+    { name: 'tokenOut',          type: 'address' },
+    { name: 'amountIn',          type: 'uint256' },
+    { name: 'fee',               type: 'uint24'  },
+    { name: 'sqrtPriceLimitX96', type: 'uint160' },
+  ]}],
+  outputs: [
+    { name: 'amountOut',               type: 'uint256' },
+    { name: 'sqrtPriceX96After',       type: 'uint160' },
+    { name: 'initializedTicksCrossed', type: 'uint32'  },
+    { name: 'gasEstimate',             type: 'uint256' },
+  ],
+}];
+
+const SWAP_ROUTER_ABI = [{
+  name: 'exactInputSingle', type: 'function', stateMutability: 'payable',
+  inputs: [{ name: 'params', type: 'tuple', components: [
+    { name: 'tokenIn',           type: 'address' },
+    { name: 'tokenOut',          type: 'address' },
+    { name: 'fee',               type: 'uint24'  },
+    { name: 'recipient',         type: 'address' },
+    { name: 'amountIn',          type: 'uint256' },
+    { name: 'amountOutMinimum',  type: 'uint256' },
+    { name: 'sqrtPriceLimitX96', type: 'uint160' },
+  ]}],
+  outputs: [{ name: 'amountOut', type: 'uint256' }],
+}];
+
 const POOL_SLOT0_ABI = [
   { name: 'slot0', inputs: [], outputs: [{ name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' }, { type: 'uint16' }, { type: 'uint16' }, { type: 'uint16' }, { type: 'uint8' }, { name: 'unlocked', type: 'bool' }], stateMutability: 'view', type: 'function' },
 ];
@@ -164,6 +195,33 @@ export const MINT_ABI = [{
 }];
 
 export const TICK_SPACINGS = { 100: 1, 500: 10, 3000: 60, 10000: 200 };
+
+// WETH address per chain (used for native ETH swaps)
+export const WETH_BY_CHAIN = {
+  1:     '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+  42161: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+  10:    '0x4200000000000000000000000000000000000006',
+  137:   '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+  8453:  '0x4200000000000000000000000000000000000006',
+};
+
+// Uniswap V3 QuoterV2 (read-only, no API key needed)
+export const QUOTER_V2_BY_CHAIN = {
+  1:     '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  42161: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  10:    '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  137:   '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+  8453:  '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',
+};
+
+// Uniswap V3 SwapRouter02
+export const SWAP_ROUTER_BY_CHAIN = {
+  1:     '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+  42161: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+  10:    '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+  137:   '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
+  8453:  '0x2626664c2603336E57B271c5C0b26F421741e481',
+};
 
 export function priceToTick(price) {
   if (!price || price <= 0) return 0;
@@ -396,34 +454,40 @@ export async function getPositionsForAddress(address, chainId = 8453) {
 
 // ─── Fees acumuladas ──────────────────────────────────────────────────────────
 
-export async function readAccruedFees(tokenId, chainId = 8453) {
-  const client  = getPublicClient(chainId);
+export async function readAccruedFees(tokenId, ownerAddress, chainId = 8453) {
   const nftAddr = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
 
-  try {
-    // Simula collect para obter valor real (inclui fees desde último collect)
-    const simulation = await client.simulateContract({
-      address: nftAddr,
-      abi: POSITION_MANAGER_ABI,
-      functionName: 'collect',
-      args: [{
-        tokenId:    BigInt(tokenId),
-        recipient:  '0x0000000000000000000000000000000000000001',
-        amount0Max: 340282366920938463463374607431768211455n,
-        amount1Max: 340282366920938463463374607431768211455n,
-      }],
-    });
-    return { amount0: simulation.result[0], amount1: simulation.result[1] };
-  } catch {
-    // Fallback: tokensOwed direto do estado on-chain
-    const pos = await client.readContract({
-      address: nftAddr, abi: POSITION_MANAGER_ABI, functionName: 'positions', args: [BigInt(tokenId)],
-    });
-    return {
-      amount0: pos?.tokensOwed0 ?? pos?.[10] ?? 0n,
-      amount1: pos?.tokensOwed1 ?? pos?.[11] ?? 0n,
-    };
+  // Simulate collect() with the actual owner as account — Uniswap V3 checks isAuthorizedForToken(msg.sender, tokenId)
+  if (ownerAddress) {
+    try {
+      const simulation = await readWithFallback(
+        c => c.simulateContract({
+          address: nftAddr,
+          abi: POSITION_MANAGER_ABI,
+          functionName: 'collect',
+          account: ownerAddress,
+          args: [{
+            tokenId:    BigInt(tokenId),
+            recipient:  ownerAddress,
+            amount0Max: 340282366920938463463374607431768211455n,
+            amount1Max: 340282366920938463463374607431768211455n,
+          }],
+        }),
+        chainId
+      );
+      return { amount0: simulation.result[0], amount1: simulation.result[1] };
+    } catch { /* fall through to tokensOwed fallback */ }
   }
+
+  // Fallback: tokensOwed direto do estado on-chain (snapshot, pode estar desatualizado)
+  const pos = await readWithFallback(
+    c => c.readContract({ address: nftAddr, abi: POSITION_MANAGER_ABI, functionName: 'positions', args: [BigInt(tokenId)] }),
+    chainId
+  );
+  return {
+    amount0: pos?.tokensOwed0 ?? pos?.[10] ?? 0n,
+    amount1: pos?.tokensOwed1 ?? pos?.[11] ?? 0n,
+  };
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -712,6 +776,90 @@ export async function getPositionLiquidityAmounts(pos, chainId = 8453) {
   } catch {
     return { amount0: 0, amount1: 0, inRange: false, currentTick: null };
   }
+}
+
+// ─── Uniswap V3 QuoterV2 + SwapRouter02 (fallback sem API key) ───────────────
+
+const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
+export async function getUniswapV3Quote(tokenIn, tokenOut, amountIn, chainId = 8453) {
+  const quoterAddr = QUOTER_V2_BY_CHAIN[chainId];
+  const resolvedIn  = tokenIn.toLowerCase()  === NATIVE ? WETH_BY_CHAIN[chainId] : tokenIn;
+  const resolvedOut = tokenOut.toLowerCase() === NATIVE ? WETH_BY_CHAIN[chainId] : tokenOut;
+
+  if (!quoterAddr || !resolvedIn || !resolvedOut) throw new Error('Rede não suportada pelo QuoterV2');
+
+  const feeTiers = [500, 3000, 10000, 100];
+  let bestResult = null;
+  for (const fee of feeTiers) {
+    try {
+      const sim = await readWithFallback(
+        c => c.simulateContract({
+          address: quoterAddr,
+          abi: QUOTER_V2_ABI,
+          functionName: 'quoteExactInputSingle',
+          args: [{ tokenIn: resolvedIn, tokenOut: resolvedOut, amountIn: BigInt(amountIn), fee, sqrtPriceLimitX96: 0n }],
+        }),
+        chainId
+      );
+      const amountOut = sim.result[0];
+      if (!bestResult || amountOut > bestResult.amountOut) {
+        bestResult = { amountOut, fee, gasEstimate: sim.result[3] };
+      }
+    } catch { /* fee tier unavailable */ }
+  }
+
+  if (!bestResult) throw new Error('Sem liquidez disponível para este par via Uniswap V3');
+
+  const amtOutStr = bestResult.amountOut.toString();
+  return {
+    isUniswapDirect: true,
+    buyAmount: amtOutStr,
+    sellAmount: amountIn.toString(),
+    grossBuyAmount: amtOutStr,
+    netBuyAmountEstimated: amtOutStr,
+    estimatedGas: bestResult.gasEstimate?.toString(),
+    platformFeeEstimated: '0',
+    sources: [{ name: 'Uniswap V3', proportion: '1' }],
+    fee: bestResult.fee,
+    resolvedIn,
+    resolvedOut,
+    chainId,
+  };
+}
+
+export async function executeUniswapV3Swap({ quote, sellToken, buyToken, sellAmount, recipient, chainId = 8453 }) {
+  if (!quote?.isUniswapDirect) throw new Error('Quote inválida para swap direto Uniswap V3');
+  const routerAddr = SWAP_ROUTER_BY_CHAIN[chainId];
+  if (!routerAddr) throw new Error('SwapRouter não disponível nesta rede');
+
+  const isETHIn = sellToken.toLowerCase() === NATIVE;
+  const walletClient = await getWalletClient(chainId);
+  const [account]    = await walletClient.getAddresses();
+  const amountIn     = BigInt(sellAmount);
+  // 1% slippage computed at runtime from the quoted output
+  const rawOut       = BigInt(quote.netBuyAmountEstimated || quote.buyAmount || '0');
+  const amountOutMin = rawOut - rawOut / BigInt(100);
+
+  const hash = await walletClient.writeContract({
+    account,
+    address: routerAddr,
+    abi: SWAP_ROUTER_ABI,
+    functionName: 'exactInputSingle',
+    args: [{
+      tokenIn:           quote.resolvedIn,
+      tokenOut:          quote.resolvedOut,
+      fee:               quote.fee,
+      recipient:         recipient || account,
+      amountIn,
+      amountOutMinimum:  amountOutMin,
+      sqrtPriceLimitX96: 0n,
+    }],
+    value: isETHIn ? amountIn : 0n,
+    chain: CHAINS[chainId] || base,
+  });
+  const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash });
+  return { hash, receipt };
 }
 
 // ─── Harvest (transação real — habilitada em produção) ────────────────────────

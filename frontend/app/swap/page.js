@@ -5,6 +5,7 @@ import { getSwapQuote } from '../../lib/api';
 import {
   getPublicClient, getWalletClient, checkERC20Allowance,
   approveERC20Token, ERC20_FULL_ABI,
+  getUniswapV3Quote, executeUniswapV3Swap, SWAP_ROUTER_BY_CHAIN,
 } from '../../lib/web3';
 import { parseUnits, formatUnits } from 'viem';
 
@@ -182,24 +183,28 @@ export default function SwapPage() {
     setLoading(true);
     setError(null);
     try {
-      // Estimate trade USD for routing hints
       const qty    = parseFloat(sellAmt) || 0;
       const sym    = sell.symbol.toUpperCase();
       const tradeUsdEst = (sym === 'USDC' || sym === 'USDT') ? qty
         : (sym === 'ETH' || sym === 'WETH') ? qty * 3000
         : 0;
-      // For small trades (<$20) exclude high-gas DEXes to get cheaper routes
       const excludedSources = tradeUsdEst > 0 && tradeUsdEst < 20
         ? 'Uniswap_V2,Curve,Balancer_V2' : undefined;
 
-      const data = await getSwapQuote({
-        chainId: chainId || 8453,
-        sellToken: sell.address,
-        buyToken:  buy.address,
-        sellAmount: sellAmountWei.toString(),
-        ...(address && { takerAddress: address }),
-        ...(excludedSources && { excludedSources }),
-      });
+      let data;
+      try {
+        data = await getSwapQuote({
+          chainId: chainId || 8453,
+          sellToken: sell.address,
+          buyToken:  buy.address,
+          sellAmount: sellAmountWei.toString(),
+          ...(address && { takerAddress: address }),
+          ...(excludedSources && { excludedSources }),
+        });
+      } catch {
+        // Backend unavailable → fall back to Uniswap V3 QuoterV2 on-chain (no API key needed)
+        data = await getUniswapV3Quote(sell.address, buy.address, sellAmountWei.toString(), chainId || 8453);
+      }
       setQuote(data);
     } catch (err) {
       setError(err.message);
@@ -219,7 +224,61 @@ export default function SwapPage() {
   const executeSwap = useCallback(async () => {
     if (!quote || !address) return;
 
-    // ── Validar calldata ──
+    // ── Uniswap V3 path (fallback quando backend 0x indisponível) ──
+    if (quote.isUniswapDirect) {
+      setTxStep('idle');
+      setTxError(null);
+      setTxHash(null);
+      try {
+        const cid = chainId || 8453;
+        const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+        const isETH  = sell.address.toLowerCase() === NATIVE;
+        const sellAmtWei = toWei(sellAmt, sell.decimals);
+
+        if (!isETH) {
+          const routerAddr = SWAP_ROUTER_BY_CHAIN[cid] || SWAP_ROUTER_BY_CHAIN[8453];
+          const allowance = await checkERC20Allowance(sell.address, address, routerAddr, cid);
+          if (allowance < sellAmtWei) {
+            setTxStep('approving');
+            const { hash: aprHash } = await approveERC20Token(sell.address, routerAddr, undefined, cid);
+            setTxHash(aprHash);
+            await getPublicClient(cid).waitForTransactionReceipt({ hash: aprHash });
+            setTxHash(null);
+          }
+        }
+
+        setTxStep('swapping');
+        const { hash } = await executeUniswapV3Swap({
+          quote, sellToken: sell.address, buyToken: buy.address,
+          sellAmount: sellAmtWei.toString(), recipient: address, chainId: cid,
+        });
+        setTxHash(hash);
+        setTxStep('confirming');
+        try {
+          await getPublicClient(cid).waitForTransactionReceipt({ hash, timeout: 180_000 });
+          setTxStep('success');
+          setQuote(null); setSellAmt(''); setBalanceTick(t => t + 1);
+        } catch (waitErr) {
+          const isTimeout = waitErr.name === 'WaitForTransactionReceiptTimeoutError'
+            || (waitErr.message || '').toLowerCase().includes('timed out');
+          if (!isTimeout) throw waitErr;
+          const receipt = await getPublicClient(cid).getTransactionReceipt({ hash }).catch(() => null);
+          if (receipt?.status === 'success') {
+            setTxStep('success'); setQuote(null); setSellAmt(''); setBalanceTick(t => t + 1);
+          } else if (receipt?.status === 'reverted') {
+            setTxError('Transação revertida pela rede.'); setTxStep('error');
+          } else {
+            setTxStep('pending');
+          }
+        }
+      } catch (err) {
+        setTxError(parseSwapError(err));
+        setTxStep('error');
+      }
+      return;
+    }
+
+    // ── Validar calldata (0x path) ──
     if (!quote.to || !quote.data) {
       setError('Cotação sem calldata. Aguarde nova cotação ou reconecte a carteira.');
       return;
@@ -440,7 +499,7 @@ export default function SwapPage() {
     <div className="max-w-lg mx-auto space-y-6 py-4 animate-fade-in">
       <div>
         <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-violet-950/40 border border-violet-800/30 rounded-full text-xs text-violet-400 font-medium mb-3">
-          <span>⇅</span> 0x Protocol · Melhor rota automática
+          <span>⇅</span> {quote?.isUniswapDirect ? 'Uniswap V3 · Rota direta' : '0x Protocol · Melhor rota automática'}
         </div>
         <h1 className="text-3xl font-bold text-white">Swap</h1>
         <p className="text-slate-500 mt-1.5 text-sm">

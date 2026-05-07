@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useWallet } from '../../components/common/WalletProvider';
 import {
   getPositionsForAddress, collectPositionFees, closePosition,
-  getPositionLiquidityAmounts,
+  getPositionLiquidityAmounts, readAccruedFees,
 } from '../../lib/web3';
 import { getTokenPricesUSD, toUSD, fmtUSD } from '../../lib/prices';
 import HarvestModal from '../../components/harvest/HarvestModal';
@@ -191,31 +191,40 @@ export default function PositionsPage() {
       setPrices(fetchedPrices);
 
       for (const pos of positions) {
-        const fees0 = Number(BigInt(pos.tokensOwed0 || '0')) / 10 ** pos.decimals0;
-        const fees1 = Number(BigInt(pos.tokensOwed1 || '0')) / 10 ** pos.decimals1;
-        const f0USD = toUSD(fees0, pos.token0Symbol, fetchedPrices);
-        const f1USD = toUSD(fees1, pos.token1Symbol, fetchedPrices);
-        const feesUSD = f0USD != null || f1USD != null ? (f0USD ?? 0) + (f1USD ?? 0) : null;
-
-        // Mint record for this position (APR + IL base)
         const rec = mintRecords[pos.tokenId];
 
-        if (!pos.hasLiquidity) {
-          const aprPct = rec?.investedUSD && rec?.createdAt
-            ? calcAPR(feesUSD ?? 0, Number(rec.investedUSD), rec.createdAt) : null;
-          setPosValues(prev => ({
-            ...prev,
-            [pos.tokenId]: {
-              loading: false, amount0: 0, amount1: 0, liqUSD: 0,
-              fees0, fees1, fees0USD: f0USD, fees1USD: f1USD, feesUSD,
-              totalUSD: feesUSD ?? 0, inRange: false, aprPct,
-            },
-          }));
-          continue;
-        }
+        (async () => {
+          // Real accrued fees via simulate collect() — falls back to tokensOwed on error
+          let fees0 = 0, fees1 = 0;
+          try {
+            const { amount0: a0, amount1: a1 } = await readAccruedFees(pos.tokenId, address, chainId || 8453);
+            fees0 = Number(a0) / 10 ** pos.decimals0;
+            fees1 = Number(a1) / 10 ** pos.decimals1;
+          } catch {
+            fees0 = Number(BigInt(pos.tokensOwed0 || '0')) / 10 ** pos.decimals0;
+            fees1 = Number(BigInt(pos.tokensOwed1 || '0')) / 10 ** pos.decimals1;
+          }
 
-        getPositionLiquidityAmounts(pos, chainId || 8453)
-          .then(({ amount0, amount1, inRange }) => {
+          const f0USD = toUSD(fees0, pos.token0Symbol, fetchedPrices);
+          const f1USD = toUSD(fees1, pos.token1Symbol, fetchedPrices);
+          const feesUSD = f0USD != null || f1USD != null ? (f0USD ?? 0) + (f1USD ?? 0) : null;
+
+          if (!pos.hasLiquidity) {
+            const aprPct = rec?.investedUSD && rec?.createdAt
+              ? calcAPR(feesUSD ?? 0, Number(rec.investedUSD), rec.createdAt) : null;
+            setPosValues(prev => ({
+              ...prev,
+              [pos.tokenId]: {
+                loading: false, amount0: 0, amount1: 0, liqUSD: 0,
+                fees0, fees1, fees0USD: f0USD, fees1USD: f1USD, feesUSD,
+                totalUSD: feesUSD ?? 0, inRange: false, aprPct,
+              },
+            }));
+            return;
+          }
+
+          try {
+            const { amount0, amount1, inRange } = await getPositionLiquidityAmounts(pos, chainId || 8453);
             const calcFailed = amount0 === 0 && amount1 === 0 && BigInt(pos.liquidity || '0') > 0n;
 
             let liqUSD = null;
@@ -230,18 +239,35 @@ export default function PositionsPage() {
               : feesUSD != null ? feesUSD
               : null;
 
-            // APR: annualised fee yield since position opened
-            const investedUSD = rec?.investedUSD ? Number(rec.investedUSD) : null;
-            const aprPct = feesUSD != null && investedUSD && rec?.createdAt
-              ? calcAPR(feesUSD, investedUSD, rec.createdAt) : null;
+            // First-visit snapshot: save invested capital when position has no mint record
+            if (!rec && !calcFailed && liqUSD != null && liqUSD > 0) {
+              const snapshot = {
+                tokenId: pos.tokenId,
+                investedUSD: liqUSD + (feesUSD ?? 0),
+                amount0,
+                amount1,
+                createdAt: Date.now(),
+                isEstimate: true,
+              };
+              try {
+                localStorage.setItem(
+                  `flowfi.position.${address.toLowerCase()}.${pos.tokenId}`,
+                  JSON.stringify(snapshot)
+                );
+                setMintRecords(prev => ({ ...prev, [pos.tokenId]: snapshot }));
+              } catch {}
+            }
 
-            // Impermanent Loss: LP value vs HODL with entry amounts
+            const activeRec = rec || mintRecords[pos.tokenId];
+            const investedUSD = activeRec?.investedUSD ? Number(activeRec.investedUSD) : null;
+            const aprPct = feesUSD != null && investedUSD && activeRec?.createdAt
+              ? calcAPR(feesUSD, investedUSD, activeRec.createdAt) : null;
+
             const p0 = fetchedPrices[pos.token0Symbol];
             const p1 = fetchedPrices[pos.token1Symbol];
-            const ilPct = !calcFailed && rec?.amount0 != null
-              ? calcIL(rec.amount0, rec.amount1, amount0, amount1, p0, p1) : null;
+            const ilPct = !calcFailed && activeRec?.amount0 != null
+              ? calcIL(activeRec.amount0, activeRec.amount1, amount0, amount1, p0, p1) : null;
 
-            // ROI: total return vs invested capital
             const roiPct = totalUSD != null && investedUSD
               ? (totalUSD - investedUSD) / investedUSD * 100 : null;
 
@@ -254,16 +280,16 @@ export default function PositionsPage() {
                 aprPct, ilPct, roiPct,
               },
             }));
-          })
-          .catch(() => {
+          } catch {
             setPosValues(prev => ({
               ...prev,
               [pos.tokenId]: { loading: false, error: true, fees0, fees1, feesUSD, fees0USD: f0USD, fees1USD: f1USD },
             }));
-          });
+          }
+        })();
       }
     });
-  }, [positions, chainId]);
+  }, [positions, chainId, address]);
 
   // ── Summary metrics ───────────────────────────────────────────────────────
 
@@ -560,7 +586,9 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
 
   const busy   = act.step === 'collecting' || act.step === 'finalizing';
   const isDone = act.step === 'finalized';
-  const hasFees = BigInt(pos.tokensOwed0 || '0') > 0n || BigInt(pos.tokensOwed1 || '0') > 0n;
+  // Use real fee values from simulation when available; fall back to tokensOwed snapshot
+  const hasFees = (pv?.fees0 > 0 || pv?.fees1 > 0)
+    || BigInt(pos.tokensOwed0 || '0') > 0n || BigInt(pos.tokensOwed1 || '0') > 0n;
 
   const sym0 = pos.token0Symbol && pos.token0Symbol !== '???' && pos.token0Symbol !== '—'
     ? pos.token0Symbol
