@@ -38,10 +38,11 @@ module.exports = {
         'gradient-emerald': 'linear-gradient(135deg, rgba(16,185,129,0.1) 0%, transparent 100%)',
       },
       animation: {
-        'shimmer': 'shimmer 1.8s ease-in-out infinite',
+        'shimmer':    'shimmer 1.8s ease-in-out infinite',
         'glow-pulse': 'glowPulse 2s ease-in-out infinite',
-        'fade-in': 'fadeIn 0.3s ease-out',
-        'slide-up': 'slideUp 0.3s ease-out',
+        'fade-in':    'fadeIn 0.3s ease-out',
+        'slide-up':   'slideUp 0.3s ease-out',
+        'slide-right':'slideRight 0.25s cubic-bezier(0.32,0.72,0,1)',
       },
       keyframes: {
         shimmer: {
@@ -59,6 +60,10 @@ module.exports = {
         slideUp: {
           from: { opacity: '0', transform: 'translateY(8px)' },
           to:   { opacity: '1', transform: 'translateY(0)' },
+        },
+        slideRight: {
+          from: { transform: 'translateX(100%)' },
+          to:   { transform: 'translateX(0)' },
         },
       },
     },

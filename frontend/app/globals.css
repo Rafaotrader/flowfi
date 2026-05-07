@@ -66,6 +66,9 @@
            disabled:opacity-40 disabled:cursor-not-allowed
            flex items-center justify-center gap-2;
     box-shadow: 0 4px 16px rgba(124,58,237,0.4), inset 0 1px 0 rgba(255,255,255,0.12);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .btn-primary:hover:not(:disabled) {
@@ -77,17 +80,26 @@
            text-slate-300 font-medium px-5 py-2.5 rounded-xl
            transition-all duration-150
            disabled:opacity-40 disabled:cursor-not-allowed;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .btn-ghost {
     @apply text-slate-400 hover:text-white hover:bg-white/[0.05]
            font-medium px-4 py-2 rounded-xl transition-all duration-150;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .btn-danger {
     @apply bg-red-800/60 hover:bg-red-700/80 text-white border border-red-700/40
            font-semibold px-5 py-2.5 rounded-xl transition-all duration-150
            disabled:opacity-40 disabled:cursor-not-allowed;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .btn-success {
@@ -95,6 +107,9 @@
            font-semibold px-5 py-2.5 rounded-xl transition-all duration-150
            disabled:opacity-40 disabled:cursor-not-allowed;
     box-shadow: 0 4px 12px rgba(16,185,129,0.3);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* ── Badges ─────────────────────────────────────────────────── */

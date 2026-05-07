@@ -16,17 +16,30 @@ const NETWORK_NAMES = {
 };
 
 const CHAIN_PARAMS = {
-  1:     { chainId: '0x1',    chainName: 'Ethereum Mainnet', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://eth.llamarpc.com'],     blockExplorerUrls: ['https://etherscan.io'] },
-  42161: { chainId: '0xa4b1', chainName: 'Arbitrum One',     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://arb1.arbitrum.io/rpc'], blockExplorerUrls: ['https://arbiscan.io'] },
-  10:    { chainId: '0xa',    chainName: 'OP Mainnet',        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.optimism.io'],  blockExplorerUrls: ['https://optimistic.etherscan.io'] },
-  137:   { chainId: '0x89',   chainName: 'Polygon Mainnet',  nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://polygon-rpc.com'],    blockExplorerUrls: ['https://polygonscan.com'] },
-  8453:  { chainId: '0x2105', chainName: 'Base',              nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.base.org'],     blockExplorerUrls: ['https://basescan.org'] },
-  56:    { chainId: '0x38',   chainName: 'BNB Smart Chain',  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },     rpcUrls: ['https://bsc-dataseed.binance.org'], blockExplorerUrls: ['https://bscscan.com'] },
+  1:     { chainId: '0x1',    chainName: 'Ethereum Mainnet', nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://eth.llamarpc.com'],         blockExplorerUrls: ['https://etherscan.io']          },
+  42161: { chainId: '0xa4b1', chainName: 'Arbitrum One',     nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://arb1.arbitrum.io/rpc'],      blockExplorerUrls: ['https://arbiscan.io']            },
+  10:    { chainId: '0xa',    chainName: 'OP Mainnet',        nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://mainnet.optimism.io'],        blockExplorerUrls: ['https://optimistic.etherscan.io'] },
+  137:   { chainId: '0x89',   chainName: 'Polygon Mainnet',  nativeCurrency: { name: 'MATIC',  symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://polygon-rpc.com'],            blockExplorerUrls: ['https://polygonscan.com']        },
+  8453:  { chainId: '0x2105', chainName: 'Base',              nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://mainnet.base.org'],           blockExplorerUrls: ['https://basescan.org']           },
+  56:    { chainId: '0x38',   chainName: 'BNB Smart Chain',   nativeCurrency: { name: 'BNB',    symbol: 'BNB',   decimals: 18 }, rpcUrls: ['https://bsc-dataseed.binance.org'],   blockExplorerUrls: ['https://bscscan.com']            },
 };
 
 const SUPPORTED = [1, 42161, 10, 137, 8453, 56];
 
-// Resolve promise com timeout — evita hang infinito do MetaMask
+const FLOWFI_URL = 'flowfi-neon.vercel.app';
+const METAMASK_DEEPLINK = `https://metamask.app.link/dapp/${FLOWFI_URL}`;
+
+function detectMobile() {
+  if (typeof navigator === 'undefined') return false;
+  return /iPhone|iPad|iPod|Android|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+function detectInAppBrowser() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /Instagram|FBAN|FBAV|WhatsApp|Line\/|MicroMessenger|FB_IAB|FB4A|FBIOS/i.test(ua);
+}
+
 function withTimeout(promise, ms, msg) {
   return Promise.race([
     promise,
@@ -37,10 +50,17 @@ function withTimeout(promise, ms, msg) {
 }
 
 export default function WalletProvider({ children }) {
-  const [address,    setAddress]    = useState(null);
-  const [chainId,    setChainId]    = useState(null);
-  const [connecting, setConnecting] = useState(false);
-  const [connError,  setConnError]  = useState(null);
+  const [address,        setAddress]        = useState(null);
+  const [chainId,        setChainId]        = useState(null);
+  const [connecting,     setConnecting]     = useState(false);
+  const [connError,      setConnError]      = useState(null);
+  const [isMobile,       setIsMobile]       = useState(false);
+  const [isInAppBrowser, setIsInAppBrowser] = useState(false);
+
+  useEffect(() => {
+    setIsMobile(detectMobile());
+    setIsInAppBrowser(detectInAppBrowser());
+  }, []);
 
   const disconnect = useCallback(() => {
     setAddress(null);
@@ -50,7 +70,6 @@ export default function WalletProvider({ children }) {
     localStorage.removeItem('ufm_token');
   }, []);
 
-  // Restaurar sessão silenciosamente (sem popup)
   useEffect(() => {
     if (typeof window === 'undefined' || !window.ethereum) return;
 
@@ -88,7 +107,6 @@ export default function WalletProvider({ children }) {
         params: [{ chainId: hex }],
       });
     } catch (err) {
-      // 4902 = rede desconhecida; -32603 = mesmo em alguns providers
       if (err.code === 4902 || err.code === -32603) {
         const params = CHAIN_PARAMS[targetChainId];
         if (!params) throw new Error(`Rede ${targetChainId} não suportada`);
@@ -104,8 +122,17 @@ export default function WalletProvider({ children }) {
 
   async function connect() {
     if (connecting) return;
+    if (typeof window === 'undefined') return;
 
-    if (typeof window === 'undefined' || !window.ethereum) {
+    const mobile = detectMobile();
+
+    // Mobile without injected provider → redirect into MetaMask browser
+    if (!window.ethereum && mobile) {
+      window.location.href = METAMASK_DEEPLINK;
+      return;
+    }
+
+    if (!window.ethereum) {
       setConnError('MetaMask não encontrado. Instale em metamask.io');
       return;
     }
@@ -114,7 +141,6 @@ export default function WalletProvider({ children }) {
     setConnError(null);
 
     try {
-      // Race com timeout de 30s — evita loading infinito se MetaMask travar
       const accs = await withTimeout(
         window.ethereum.request({ method: 'eth_requestAccounts' }),
         30_000,
@@ -123,30 +149,23 @@ export default function WalletProvider({ children }) {
 
       if (!accs?.length) throw new Error('Nenhuma conta autorizada no MetaMask.');
 
-      const hex         = await window.ethereum.request({ method: 'eth_chainId' });
+      const hex          = await window.ethereum.request({ method: 'eth_chainId' });
       const currentChain = parseInt(hex, 16);
 
       setAddress(accs[0]);
       setChainId(currentChain);
       localStorage.setItem('ufm_address', accs[0]);
 
-      // Auto-switch para Base se estiver em outra rede
       if (currentChain !== 8453) {
-        try {
-          await switchNetwork(8453);
-        } catch {
-          // Não fatal — banner "Trocar para Base" aparece na Navbar
-        }
+        try { await switchNetwork(8453); } catch { /* banner shows */ }
       }
     } catch (err) {
       if (err.code === 4001) {
-        // Usuário recusou — não é erro crítico
         setConnError(null);
       } else {
         setConnError(err.message);
       }
     } finally {
-      // SEMPRE reseta o loading — independente do resultado
       setConnecting(false);
     }
   }
@@ -163,6 +182,7 @@ export default function WalletProvider({ children }) {
       address, chainId, chainName,
       isConnected, isMainnet, isBase, isSupported,
       connecting, connError,
+      isMobile, isInAppBrowser,
       connect, disconnect, switchNetwork, switchToBase,
     }}>
       {children}
