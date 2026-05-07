@@ -142,7 +142,9 @@ const FACTORY_ABI = [
 ];
 
 const QUOTER_V2_ABI = [{
-  name: 'quoteExactInputSingle', type: 'function', stateMutability: 'nonpayable',
+  name: 'quoteExactInputSingle',
+  type: 'function',
+  stateMutability: 'view', // called via eth_call (readContract) — no account needed
   inputs: [{ name: 'params', type: 'tuple', components: [
     { name: 'tokenIn',           type: 'address' },
     { name: 'tokenOut',          type: 'address' },
@@ -292,17 +294,19 @@ export async function getWalletClient(chainId = 8453) {
 
 // ─── Posições on-chain ────────────────────────────────────────────────────────
 
-// Fallback RPC endpoints for Base — tried in order when one is unavailable/rate-limited
-const BASE_RPCS = [
-  'https://mainnet.base.org',
-  'https://base.llamarpc.com',
-  'https://base-rpc.publicnode.com',
-];
+// Fallback RPC endpoints per chain — tried in order when one is rate-limited/down
+const CHAIN_FALLBACK_RPCS = {
+  1:     ['https://eth.llamarpc.com',       'https://rpc.ankr.com/eth',       'https://ethereum-rpc.publicnode.com'],
+  42161: ['https://arb1.arbitrum.io/rpc',   'https://arbitrum-one-rpc.publicnode.com', 'https://rpc.ankr.com/arbitrum'],
+  10:    ['https://mainnet.optimism.io',    'https://optimism-rpc.publicnode.com',     'https://rpc.ankr.com/optimism'],
+  137:   ['https://polygon-rpc.com',        'https://polygon-bor-rpc.publicnode.com',  'https://rpc.ankr.com/polygon'],
+  8453:  ['https://mainnet.base.org',       'https://base.llamarpc.com',               'https://base-rpc.publicnode.com'],
+};
 
 // Calls fn(publicClient) trying each RPC until one succeeds.
 // Does NOT retry on contract reverts or user rejections.
 async function readWithFallback(fn, chainId = 8453) {
-  const rpcs = chainId === 8453 ? BASE_RPCS : [RPC_URLS[chainId] || RPC_URLS[1]];
+  const rpcs = CHAIN_FALLBACK_RPCS[chainId] || [RPC_URLS[chainId] || RPC_URLS[1]];
   let lastErr;
   for (const rpc of rpcs) {
     try {
@@ -793,20 +797,25 @@ export async function getUniswapV3Quote(tokenIn, tokenOut, amountIn, chainId = 8
   let bestResult = null;
   for (const fee of feeTiers) {
     try {
-      const sim = await readWithFallback(
-        c => c.simulateContract({
+      // readContract uses eth_call (no account needed) — correct for QuoterV2
+      const result = await readWithFallback(
+        c => c.readContract({
           address: quoterAddr,
           abi: QUOTER_V2_ABI,
           functionName: 'quoteExactInputSingle',
-          args: [{ tokenIn: resolvedIn, tokenOut: resolvedOut, amountIn: BigInt(amountIn), fee, sqrtPriceLimitX96: 0n }],
+          args: [{ tokenIn: resolvedIn, tokenOut: resolvedOut, amountIn: BigInt(amountIn), fee: BigInt(fee), sqrtPriceLimitX96: 0n }],
         }),
         chainId
       );
-      const amountOut = sim.result[0];
+      // viem readContract: named multi-output → array; access by index or name
+      const amountOut = (Array.isArray(result) ? result[0] : result?.amountOut) || 0n;
+      if (!amountOut || amountOut === 0n) continue;
       if (!bestResult || amountOut > bestResult.amountOut) {
-        bestResult = { amountOut, fee, gasEstimate: sim.result[3] };
+        bestResult = { amountOut, fee };
       }
-    } catch { /* fee tier unavailable */ }
+    } catch (e) {
+      console.warn(`[QuoterV2] fee ${fee} skipped:`, e?.message?.slice(0, 100));
+    }
   }
 
   if (!bestResult) throw new Error('Sem liquidez disponível para este par via Uniswap V3');
@@ -818,7 +827,7 @@ export async function getUniswapV3Quote(tokenIn, tokenOut, amountIn, chainId = 8
     sellAmount: amountIn.toString(),
     grossBuyAmount: amtOutStr,
     netBuyAmountEstimated: amtOutStr,
-    estimatedGas: bestResult.gasEstimate?.toString(),
+    estimatedGas: '200000',
     platformFeeEstimated: '0',
     sources: [{ name: 'Uniswap V3', proportion: '1' }],
     fee: bestResult.fee,

@@ -149,14 +149,29 @@ export default function SwapPage() {
   const [balanceTick, setBalanceTick] = useState(0); // increment to force refetch
   const [gasBlockOverride, setGasBlockOverride] = useState(false);
 
-  // Reset tokens when chain changes
+  // Reset tokens + state when chain changes
   useEffect(() => {
     const list = TOKEN_LIST[chainId] || TOKEN_LIST[8453];
     setSell(list[0]);
     setBuy(list[1]);
     setQuote(null);
     setSellAmt('');
+    setTxStep('idle');
+    setTxError(null);
+    setTxHash(null);
+    setGasBlockOverride(false);
   }, [chainId]);
+
+  // Reset quote + tx state when wallet address changes
+  useEffect(() => {
+    setQuote(null);
+    setSellAmt('');
+    setTxStep('idle');
+    setTxError(null);
+    setTxHash(null);
+    setGasBlockOverride(false);
+    setBalanceTick(t => t + 1);
+  }, [address]);
 
   // Fetch wallet balances — cancelled flag prevents stale state on rapid changes
   useEffect(() => {
@@ -406,7 +421,7 @@ export default function SwapPage() {
       setTxError(parseSwapError(err));
       setTxStep('error');
     }
-  }, [quote, address, chainId, sell, sellAmt]);
+  }, [quote, address, chainId, sell, buy, sellAmt]);
 
   // Verifica receipt de tx pendente — chamado pelo botão "Verificar novamente"
   const verifyTx = useCallback(async () => {

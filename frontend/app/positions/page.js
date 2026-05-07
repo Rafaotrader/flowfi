@@ -50,6 +50,13 @@ function fmtAmt(val, decimals = 18) {
   } catch { return '—'; }
 }
 
+function fmtAmt2(n) {
+  if (!Number.isFinite(n) || n === 0) return '0';
+  if (n < 0.000001) return '<0.000001';
+  if (n < 0.001) return n.toExponential(2);
+  return n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+}
+
 function fmtHuman(n) {
   if (!Number.isFinite(n) || n === 0) return '0';
   if (n < 0.0001) return '<0.0001';
@@ -316,9 +323,10 @@ export default function PositionsPage() {
   }
 
   async function handleCollect(pos) {
-    const owed0 = BigInt(pos.tokensOwed0 || '0');
-    const owed1 = BigInt(pos.tokensOwed1 || '0');
-    if (owed0 === 0n && owed1 === 0n) {
+    const pv = posValues[pos.tokenId];
+    const hasRealFees  = pv?.fees0 > 0 || pv?.fees1 > 0;
+    const hasOwedFees  = BigInt(pos.tokensOwed0 || '0') > 0n || BigInt(pos.tokensOwed1 || '0') > 0n;
+    if (!hasRealFees && !hasOwedFees) {
       setPosAct(pos.tokenId, { step: 'noFees' });
       return;
     }
@@ -674,10 +682,17 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
           label="Fees acumuladas"
           value={
             pv?.loading ? <div className="skeleton-shimmer h-5 w-16 rounded" />
-            : feesUSD != null && feesUSD > 0 ? <span className="text-emerald-400 font-bold">{fmtUSD(feesUSD)}</span>
-            : <span className="text-slate-600">$0</span>
+            : feesUSD != null && feesUSD > 0
+              ? <span className="text-emerald-400 font-bold">{fmtUSD(feesUSD)}</span>
+              : feesUSD === 0
+                ? <span className="text-slate-600 text-xs">Nenhuma ainda</span>
+                : <span className="text-slate-600">—</span>
           }
-          sub={`${fmtAmt(pos.tokensOwed0, pos.decimals0)} ${sym0} · ${fmtAmt(pos.tokensOwed1, pos.decimals1)} ${sym1}`}
+          sub={
+            pv?.fees0 != null
+              ? `${fmtAmt2(pv.fees0)} ${sym0} · ${fmtAmt2(pv.fees1)} ${sym1}`
+              : `${fmtAmt(pos.tokensOwed0, pos.decimals0)} ${sym0} · ${fmtAmt(pos.tokensOwed1, pos.decimals1)} ${sym1}`
+          }
           highlighted={hasFees}
         />
         <MetricBox
