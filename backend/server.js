@@ -144,6 +144,10 @@ const MOCK_POOLS = [
 
 // ─── Raiz e health ────────────────────────────────────────────────────────────
 
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.get('/', (req, res) => {
   res.json({
     message: `Flowfy API online na porta ${PORT}`,

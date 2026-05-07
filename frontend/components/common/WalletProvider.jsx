@@ -26,7 +26,7 @@ const CHAIN_PARAMS = {
 
 const SUPPORTED = [1, 42161, 10, 137, 8453, 56];
 
-const FLOWFI_URL = 'flowfy-neon.vercel.app';
+const FLOWFI_URL = process.env.NEXT_PUBLIC_APP_URL || 'flowfy-neon.vercel.app';
 const METAMASK_DEEPLINK = `https://metamask.app.link/dapp/${FLOWFI_URL}`;
 
 function detectMobile() {

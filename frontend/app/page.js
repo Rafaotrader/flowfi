@@ -253,9 +253,9 @@ export default function DashboardPage() {
 
       {/* ── Backend status ──────────────────────────────────── */}
       {apiOnline === false && (
-        <div className="flex items-center gap-3 bg-red-950/30 border border-red-900/30 rounded-xl px-4 py-3 text-sm text-red-400">
-          <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-          Backend offline — verifique se o servidor está rodando com <code className="bg-black/30 px-1.5 py-0.5 rounded text-xs mx-1">npm run dev</code> na pasta backend.
+        <div className="flex items-center gap-3 bg-amber-950/30 border border-amber-900/30 rounded-xl px-4 py-3 text-sm text-amber-400">
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+          Serviço temporariamente indisponível — tente recarregar a página em alguns instantes.
         </div>
       )}
 
@@ -360,8 +360,7 @@ export default function DashboardPage() {
             <p className="text-5xl">📭</p>
             <p className="text-slate-300 font-medium">Nenhuma pool encontrada</p>
             <p className="text-slate-600 text-sm">
-              Verifique se o backend está rodando com{' '}
-              <code className="bg-white/[0.06] px-1.5 py-0.5 rounded text-xs">npm run dev</code>
+              Nenhum dado disponível nesta rede no momento. Tente outra rede ou atualize.
             </p>
           </div>
         )}
