@@ -2,11 +2,12 @@
 import { useWallet } from './WalletProvider';
 
 export const SUPPORTED_NETWORKS = [
+  { chainId: 8453,  name: 'Base',     badge: 'BASE', cls: 'text-blue-400    border-blue-800    bg-blue-950/40'    },
   { chainId: 1,     name: 'Ethereum', badge: 'ETH',  cls: 'text-indigo-400  border-indigo-800  bg-indigo-950/40'  },
   { chainId: 42161, name: 'Arbitrum', badge: 'ARB',  cls: 'text-sky-400     border-sky-800     bg-sky-950/40'     },
+  { chainId: 56,    name: 'BNB Chain',badge: 'BNB',  cls: 'text-yellow-400  border-yellow-800  bg-yellow-950/40'  },
   { chainId: 10,    name: 'Optimism', badge: 'OP',   cls: 'text-red-400     border-red-800     bg-red-950/40'     },
   { chainId: 137,   name: 'Polygon',  badge: 'POL',  cls: 'text-violet-400  border-violet-800  bg-violet-950/40'  },
-  { chainId: 8453,  name: 'Base',     badge: 'BASE', cls: 'text-blue-400    border-blue-800    bg-blue-950/40'    },
 ];
 
 export const SUPPORTED_CHAIN_IDS = SUPPORTED_NETWORKS.map(n => n.chainId);

@@ -21,9 +21,10 @@ const CHAIN_PARAMS = {
   10:    { chainId: '0xa',    chainName: 'OP Mainnet',        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.optimism.io'],  blockExplorerUrls: ['https://optimistic.etherscan.io'] },
   137:   { chainId: '0x89',   chainName: 'Polygon Mainnet',  nativeCurrency: { name: 'MATIC', symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://polygon-rpc.com'],    blockExplorerUrls: ['https://polygonscan.com'] },
   8453:  { chainId: '0x2105', chainName: 'Base',              nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 }, rpcUrls: ['https://mainnet.base.org'],     blockExplorerUrls: ['https://basescan.org'] },
+  56:    { chainId: '0x38',   chainName: 'BNB Smart Chain',  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },     rpcUrls: ['https://bsc-dataseed.binance.org'], blockExplorerUrls: ['https://bscscan.com'] },
 };
 
-const SUPPORTED = [1, 42161, 10, 137, 8453];
+const SUPPORTED = [1, 42161, 10, 137, 8453, 56];
 
 // Resolve promise com timeout — evita hang infinito do MetaMask
 function withTimeout(promise, ms, msg) {

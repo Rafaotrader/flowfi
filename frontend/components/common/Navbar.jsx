@@ -1,8 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useRef, useState, useEffect } from 'react';
 import { useWallet } from './WalletProvider';
-import { getNetworkInfo } from './NetworkSelector';
+import { getNetworkInfo, SUPPORTED_NETWORKS } from './NetworkSelector';
 
 const NAV_LINKS = [
   { href: '/',          label: 'Dashboard' },
@@ -23,6 +24,18 @@ export default function Navbar() {
 
   const networkInfo = isConnected && chainId ? getNetworkInfo(chainId) : null;
   const shortAddr   = address ? `${address.slice(0, 6)}…${address.slice(-4)}` : '';
+
+  const [netOpen, setNetOpen] = useState(false);
+  const netRef = useRef(null);
+
+  useEffect(() => {
+    if (!netOpen) return;
+    function handler(e) {
+      if (netRef.current && !netRef.current.contains(e.target)) setNetOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [netOpen]);
 
   return (
     <nav className="sticky top-0 z-40 border-b border-white/[0.06]"
@@ -72,15 +85,46 @@ export default function Navbar() {
         {/* Wallet */}
         <div className="flex items-center gap-2 shrink-0">
 
-          {/* Network badge */}
-          {isConnected && chainName && (
-            <div className={`hidden sm:flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium ${
-              networkInfo
-                ? networkInfo.cls
-                : 'text-slate-400 border-white/[0.08] bg-white/[0.03]'
-            }`}>
-              <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
-              {networkInfo?.badge || chainName}
+          {/* Network dropdown */}
+          {isConnected && chainId && (
+            <div className="relative hidden sm:block" ref={netRef}>
+              <button
+                onClick={() => setNetOpen(v => !v)}
+                className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-medium transition-all ${
+                  networkInfo
+                    ? networkInfo.cls
+                    : 'text-slate-400 border-white/[0.08] bg-white/[0.03] hover:border-white/20'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-current opacity-80" />
+                {networkInfo?.badge || chainName}
+                <svg className="w-3 h-3 opacity-60 ml-0.5" fill="none" viewBox="0 0 10 6">
+                  <path d="M1 1l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+
+              {netOpen && (
+                <div className="absolute right-0 top-full mt-1.5 bg-[#0d0d1e] border border-white/[0.08] rounded-xl p-1.5 min-w-[148px] shadow-2xl z-50">
+                  {SUPPORTED_NETWORKS.map(net => {
+                    const active = chainId === net.chainId;
+                    return (
+                      <button
+                        key={net.chainId}
+                        onClick={() => { switchNetwork(net.chainId).catch(() => {}); setNetOpen(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                          active
+                            ? net.cls
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.05]'
+                        }`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${active ? 'bg-current' : 'bg-slate-700'}`} />
+                        {net.name}
+                        {active && <span className="ml-auto text-[10px] opacity-60">ativo</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
