@@ -97,21 +97,37 @@ function parseSwapError(err) {
   if (code === 4001 || msg.includes('user rejected') || msg.includes('user denied') || msg.includes('cancelled'))
     return 'Transação cancelada pelo usuário.';
   if (msg.includes('insufficient funds') || msg.includes('saldo insuficiente'))
-    return 'Saldo insuficiente para cobrir o swap e o gas.';
+    return 'Você precisa de saldo nativo (ETH/BNB/MATIC) para pagar gas.';
   if (msg.includes('execute') && msg.includes('fail'))
-    return 'Transação revertida on-chain (Execute - Failed). Tente reduzir o valor ou aguardar nova cotação.';
+    return 'Transação revertida on-chain. Tente reduzir o valor ou aguardar nova cotação.';
   if (msg.includes('allowance'))
     return 'Allowance insuficiente — tente novamente.';
   if (msg.includes('signatureexpired') || msg.includes('expired'))
-    return 'Cotação expirada (permit2 deadline). Aguarde nova cotação automática.';
+    return 'Cotação expirada. Aguarde nova cotação automática.';
   if (msg.includes('gas'))
     return 'Estimativa de gas falhou — tente com valor menor.';
   if (msg.includes('nonce'))
     return 'Nonce inválido. Recarregue a página e tente novamente.';
   if (msg.includes('network') || msg.includes('chain'))
-    return 'Rede incorreta. Troque para Base (chainId 8453) no MetaMask.';
+    return 'Rede incorreta. Verifique a rede no MetaMask.';
+  if (msg.includes('liquidez') || msg.includes('liquidity'))
+    return 'Não encontramos rota para esse par agora. Tente outro par ou valor.';
   const raw = err.shortMessage || err.message || 'Erro desconhecido';
   return raw.length > 160 ? raw.slice(0, 160) + '…' : raw;
+}
+
+// Traduz erros de cotação para mensagem amigável
+function parseQuoteError(msg) {
+  const m = (msg || '').toLowerCase();
+  if (m.includes('liquidez') || m.includes('liquidity') || m.includes('rota'))
+    return 'Não encontramos rota para esse par agora. Tente outro valor ou par.';
+  if (m.includes('configurado') || m.includes('api') || m.includes('503'))
+    return 'Serviço temporariamente indisponível. Tente novamente em instantes.';
+  if (m.includes('expirou') || m.includes('timeout'))
+    return 'Cotação expirou — tente novamente.';
+  if (m.includes('saldo') || m.includes('funds'))
+    return 'Você precisa de saldo nativo para pagar gas.';
+  return msg && msg.length > 120 ? msg.slice(0, 120) + '…' : (msg || 'Erro ao buscar cotação');
 }
 
 export default function SwapPage() {
@@ -637,27 +653,21 @@ export default function SwapPage() {
 
         {/* API error */}
         {error && (
-          <div className={`rounded-xl p-4 text-sm space-y-1 border ${
-            error.toLowerCase().includes('configurado')
-              ? 'bg-amber-950/30 border-amber-800/40 text-amber-400'
-              : 'bg-red-950/30 border-red-800/40 text-red-400'
-          }`}>
+          <div className="rounded-xl p-4 text-sm space-y-2 border bg-red-950/20 border-red-800/40 text-red-300">
             <p className="font-medium">
-              {error.toLowerCase().includes('configurado') ? 'Swap não configurado' : 'Erro ao buscar cotação'}
+              {error.toLowerCase().includes('liquidez') || error.toLowerCase().includes('rota') || error.toLowerCase().includes('liquidity')
+                ? 'Rota indisponível'
+                : error.toLowerCase().includes('funds') || error.toLowerCase().includes('saldo')
+                ? 'Saldo insuficiente'
+                : 'Erro ao buscar cotação'}
             </p>
-            {error.toLowerCase().includes('configurado') ? (
-              <>
-                <p className="text-xs opacity-80">
-                  Configure <code className="bg-black/30 px-1 rounded">ZEROX_API_KEY</code> no arquivo <code className="bg-black/30 px-1 rounded">backend/.env</code> para ativar cotações reais.
-                </p>
-                <a href="https://dashboard.0x.org" target="_blank" rel="noopener noreferrer"
-                  className="block text-violet-400 underline text-xs mt-1">
-                  Obter ZEROX_API_KEY gratuita em dashboard.0x.org →
-                </a>
-              </>
-            ) : (
-              <p className="text-xs opacity-70">{error}</p>
-            )}
+            <p className="text-xs opacity-80">{parseQuoteError(error)}</p>
+            <button
+              onClick={() => { setError(null); fetchQuote(); }}
+              className="text-xs text-red-300 underline"
+            >
+              Tentar novamente
+            </button>
           </div>
         )}
 
