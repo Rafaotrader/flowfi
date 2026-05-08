@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useWallet } from '../../components/common/WalletProvider';
 import { getSwapQuote } from '../../lib/api';
 import {
-  getPublicClient, getWalletClient, checkERC20Allowance,
+  getPublicClient, getMetaMaskPublicClient, getWalletClient, checkERC20Allowance,
   approveERC20Token, ERC20_FULL_ABI,
   getUniswapV3Quote, executeUniswapV3Swap, SWAP_ROUTER_BY_CHAIN,
 } from '../../lib/web3';
@@ -48,7 +48,7 @@ const TOKEN_LIST = {
   ],
 };
 
-const CHAIN_NAMES = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base' };
+const CHAIN_NAMES = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 56: 'BNB' };
 const ZEROX_ALLOWANCE_TARGET = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'; // 0x Exchange Proxy
 
 function fmtAmount(n, dec = 6) {
@@ -169,9 +169,10 @@ function parseQuoteError(msg) {
 }
 
 export default function SwapPage() {
-  const { address, chainId, isConnected, connect } = useWallet();
+  const { address, activeChainId, chainId, isConnected, connect } = useWallet();
+  const currentChainId = activeChainId || chainId || 8453;
 
-  const tokens  = TOKEN_LIST[chainId] || TOKEN_LIST[8453];
+  const tokens  = TOKEN_LIST[currentChainId] || TOKEN_LIST[8453];
   const [sell,  setSell]  = useState(tokens[0]);
   const [buy,   setBuy]   = useState(tokens[1]);
   const [sellAmt, setSellAmt] = useState('');
@@ -188,7 +189,7 @@ export default function SwapPage() {
 
   // Reset tokens + state when chain changes
   useEffect(() => {
-    const list = TOKEN_LIST[chainId] || TOKEN_LIST[8453];
+    const list = TOKEN_LIST[currentChainId] || TOKEN_LIST[8453];
     setSell(list[0]);
     setBuy(list[1]);
     setQuote(null);
@@ -197,7 +198,7 @@ export default function SwapPage() {
     setTxError(null);
     setTxHash(null);
     setGasBlockOverride(false);
-  }, [chainId]);
+  }, [currentChainId]);
 
   // Reset quote + tx state when wallet address changes
   useEffect(() => {
@@ -214,18 +215,24 @@ export default function SwapPage() {
   useEffect(() => {
     if (!address || !isConnected) { setSellBal(null); setBuyBal(null); return; }
     let cancelled = false;
-    const cid = chainId || 8453;
-    const client = getPublicClient(cid);
+    const cid = currentChainId;
+    const client = getMetaMaskPublicClient(cid);
     const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
-    function fetchBal(token) {
-      return token.address.toLowerCase() === NATIVE
-        ? client.getBalance({ address })
-        : client.readContract({ address: token.address, abi: ERC20_FULL_ABI, functionName: 'balanceOf', args: [address] });
+    async function fetchBal(token) {
+      console.log('[balance] chainId', cid);
+      console.log('[balance] token', token);
+      console.log('[balance] address', address);
+      const raw = token.address.toLowerCase() === NATIVE
+        ? await client.getBalance({ address })
+        : await client.readContract({ address: token.address, abi: ERC20_FULL_ABI, functionName: 'balanceOf', args: [address] });
+      console.log('[balance] raw', raw.toString());
+      console.log('[balance] formatted', formatUnits(raw, token.decimals));
+      return raw;
     }
     fetchBal(sell).then(v => { if (!cancelled) setSellBal(v); }).catch(() => { if (!cancelled) setSellBal(null); });
     fetchBal(buy).then(v  => { if (!cancelled) setBuyBal(v);  }).catch(() => { if (!cancelled) setBuyBal(null);  });
     return () => { cancelled = true; };
-  }, [address, isConnected, sell, buy, chainId, balanceTick]);
+  }, [address, isConnected, sell, buy, currentChainId, balanceTick]);
 
   // fetchQuote must be defined BEFORE the debounced useEffect that uses it in deps
   const fetchQuote = useCallback(async () => {
@@ -235,7 +242,16 @@ export default function SwapPage() {
     setLoading(true);
     setError(null);
     console.group('[Flowfy Swap] fetchQuote');
-    console.log('Tokens:', sell.symbol, '→', buy.symbol, '| Amount:', sellAmt, '| Chain:', chainId || 8453);
+    console.group('[Flowfy Swap Debug]');
+    console.log('activeChainId:', currentChainId);
+    console.log('walletChainId:', chainId);
+    console.log('sellToken:', sell);
+    console.log('buyToken:', buy);
+    console.log('sellAmount:', sellAmt);
+    console.log('decimals:', sell.decimals);
+    console.log('amountInRaw:', sellAmountWei.toString());
+    console.groupEnd();
+    console.log('Tokens:', sell.symbol, '→', buy.symbol, '| Amount:', sellAmt, '| Chain:', currentChainId);
     try {
       const qty         = parseFloat(sellAmt) || 0;
       const sym         = sell.symbol.toUpperCase();
@@ -250,7 +266,7 @@ export default function SwapPage() {
       try {
         console.log('[Tier 1] Tentando 0x backend…');
         data = await getSwapQuote({
-          chainId: chainId || 8453,
+          chainId: currentChainId,
           sellToken: sell.address,
           buyToken:  buy.address,
           sellAmount: sellAmountWei.toString(),
@@ -265,7 +281,7 @@ export default function SwapPage() {
         // Tier 2: Uniswap V3 QuoterV2 on-chain (no API key)
         try {
           console.log('[Tier 2] Tentando Uniswap V3 QuoterV2…');
-          data = await getUniswapV3Quote(sell.address, buy.address, sellAmountWei.toString(), chainId || 8453);
+          data = await getUniswapV3Quote(sell.address, buy.address, sellAmountWei.toString(), currentChainId);
           data._source = 'uniswap';
           console.log('[Tier 2] ✓ UniV3 OK | buyAmount:', data.buyAmount, '| fee:', data.fee);
         } catch (eUni) {
@@ -283,22 +299,25 @@ export default function SwapPage() {
         }
       }
 
+      console.log('[Flowfy Swap Debug] quote provider:', data._source || (data.isUniswapDirect ? 'uniswap' : '0x'));
+      console.log('[Flowfy Swap Debug] quote result:', data);
       setQuote(data);
     } catch (err) {
+      console.error('[Flowfy Swap Debug] error real:', err);
       setError(err.message);
       setQuote(null);
     } finally {
       setLoading(false);
       console.groupEnd();
     }
-  }, [sellAmt, sell, buy, chainId, address]);
+  }, [sellAmt, sell, buy, currentChainId, chainId, address]);
 
   // Debounced quote fetch — fetchQuote in deps so takerAddress is always current
   useEffect(() => {
     if (!sellAmt || parseFloat(sellAmt) <= 0) { setQuote(null); return; }
     const timer = setTimeout(fetchQuote, 600);
     return () => clearTimeout(timer);
-  }, [sellAmt, sell, buy, chainId, fetchQuote]);
+  }, [sellAmt, sell, buy, currentChainId, fetchQuote]);
 
   const executeSwap = useCallback(async () => {
     if (!quote || !address) return;
@@ -309,7 +328,7 @@ export default function SwapPage() {
       setTxError(null);
       setTxHash(null);
       try {
-        const cid = chainId || 8453;
+        const cid = currentChainId;
         const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
         const isETH  = sell.address.toLowerCase() === NATIVE;
         const sellAmtWei = toWei(sellAmt, sell.decimals);
@@ -364,7 +383,7 @@ export default function SwapPage() {
     }
 
     // ── Validar rede ──
-    const expectedChainId = quote.chainId || 8453;
+    const expectedChainId = quote.chainId || currentChainId;
     if (chainId && chainId !== expectedChainId) {
       setTxError(`Troque para ${CHAIN_NAMES[expectedChainId] || 'Base'} (chainId ${expectedChainId}) no MetaMask antes de executar.`);
       setTxStep('error');
@@ -376,7 +395,7 @@ export default function SwapPage() {
     setTxHash(null);
 
     try {
-      const cid           = chainId || 8453;
+      const cid           = currentChainId;
       const publicClient  = getPublicClient(cid);
       const isETH         = sell.address.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
       const sellAmtWei    = toWei(sellAmt, sell.decimals);
@@ -485,13 +504,13 @@ export default function SwapPage() {
       setTxError(parseSwapError(err));
       setTxStep('error');
     }
-  }, [quote, address, chainId, sell, buy, sellAmt]);
+  }, [quote, address, currentChainId, chainId, sell, buy, sellAmt]);
 
   // Verifica receipt de tx pendente — chamado pelo botão "Verificar novamente"
   const verifyTx = useCallback(async () => {
     if (!txHash) return;
     setTxStep('confirming');
-    const publicClient = getPublicClient(chainId || 8453);
+    const publicClient = getPublicClient(currentChainId);
     try {
       const receipt = await publicClient.getTransactionReceipt({ hash: txHash });
       if (receipt?.status === 'success') {
@@ -504,7 +523,7 @@ export default function SwapPage() {
     } catch {
       setTxStep('pending');
     }
-  }, [txHash, chainId]);
+  }, [txHash, currentChainId]);
 
   const swap = () => { setSell(buy); setBuy(sell); setSellAmt(''); setQuote(null); setTxStep('idle'); setTxError(null); setTxHash(null); };
 
@@ -512,7 +531,7 @@ export default function SwapPage() {
     1: 'https://etherscan.io', 42161: 'https://arbiscan.io',
     10: 'https://optimistic.etherscan.io', 137: 'https://polygonscan.com',
     8453: 'https://basescan.org',
-  }[chainId] || 'https://basescan.org';
+  }[currentChainId] || 'https://basescan.org';
 
   // Valor recebido: preferir netBuyAmountEstimated (após taxa) ou buyAmount bruto
   const buyAmtDisplay = quote
@@ -536,7 +555,7 @@ export default function SwapPage() {
     if (!gasUnits) return null;
 
     // gas price from quote or chain-based fallback (L2 ~0.005 gwei, mainnet ~25 gwei)
-    let gasPriceGwei = (chainId === 1 ? 25 : 0.005);
+    let gasPriceGwei = (currentChainId === 1 ? 25 : 0.005);
     if (quote.gasPrice) {
       try { gasPriceGwei = Number(BigInt(quote.gasPrice)) / 1e9; } catch {}
     }
@@ -563,7 +582,7 @@ export default function SwapPage() {
     // baixo ≤3% · alto 3-10% · inviável >10%
     const level = ratio <= 0.03 ? 'baixo' : ratio <= 0.10 ? 'alto' : 'inviável';
     return { gasUsd, ratio, level, tradeUsd };
-  }, [quote, sell, buy, sellAmt, chainId]);
+  }, [quote, sell, buy, sellAmt, currentChainId]);
 
   // Smart platform fee: tiered by trade size
   const platformFeeInfo = useMemo(() => {
@@ -790,14 +809,14 @@ export default function SwapPage() {
         )}
 
         {/* Valor mínimo recomendado em Base */}
-        {chainId === 8453 && gasInfo?.tradeUsd > 0 && gasInfo.tradeUsd < 25 && gasInfo.level !== 'inviável' && (
+        {currentChainId === 8453 && gasInfo?.tradeUsd > 0 && gasInfo.tradeUsd < 25 && gasInfo.level !== 'inviável' && (
           <div className="rounded-xl p-3 text-xs border border-slate-700 bg-slate-900/50 text-slate-400">
             Para evitar que o gas consuma seu resultado, recomendamos operar acima de US$25 na Base.
           </div>
         )}
 
         {/* L2 suggestion when on mainnet */}
-        {chainId === 1 && quote && (
+        {currentChainId === 1 && quote && (
           <div className="rounded-xl p-3 text-xs border border-amber-800/30 bg-amber-950/20 text-amber-400">
             Você está na Ethereum mainnet (gas alto). Troque para Base, Arbitrum ou Optimism para pagar menos gas.
           </div>
@@ -939,7 +958,7 @@ export default function SwapPage() {
       {/* Supported chains info */}
       <div className="text-center text-xs text-slate-600 space-y-1">
         <p>Redes suportadas: Ethereum · Base · Arbitrum · Optimism · Polygon</p>
-        <p>Rede conectada: <span className="text-slate-400">{CHAIN_NAMES[chainId] || 'Desconectado'}</span></p>
+        <p>Rede conectada: <span className="text-slate-400">{CHAIN_NAMES[currentChainId] || 'Desconectado'}</span></p>
       </div>
     </div>
   );

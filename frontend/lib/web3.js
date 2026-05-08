@@ -1,18 +1,19 @@
 'use client';
 
 import { createPublicClient, createWalletClient, custom, http, parseAbi } from 'viem';
-import { mainnet, arbitrum, optimism, polygon, base } from 'viem/chains';
+import { mainnet, arbitrum, optimism, polygon, base, bsc } from 'viem/chains';
 
 // ─── Chains & addresses ───────────────────────────────────────────────────────
 
-export const CHAINS = { 1: mainnet, 42161: arbitrum, 10: optimism, 137: polygon, 8453: base };
+export const CHAINS = { 1: mainnet, 42161: arbitrum, 10: optimism, 137: polygon, 8453: base, 56: bsc };
 
 const RPC_URLS = {
-  1:     process.env.NEXT_PUBLIC_RPC_URL || 'https://eth.llamarpc.com',
+  1:     process.env.NEXT_PUBLIC_RPC_URL || 'https://ethereum.publicnode.com',
   42161: 'https://arb1.arbitrum.io/rpc',
   10:    'https://mainnet.optimism.io',
   137:   'https://polygon-rpc.com',
   8453:  'https://mainnet.base.org',
+  56:    'https://bsc-dataseed.binance.org',
 };
 
 export const POSITION_MANAGER_BY_CHAIN = {

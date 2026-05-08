@@ -16,7 +16,7 @@ const NETWORK_NAMES = {
 };
 
 const CHAIN_PARAMS = {
-  1:     { chainId: '0x1',    chainName: 'Ethereum Mainnet', nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://eth.llamarpc.com'],         blockExplorerUrls: ['https://etherscan.io']          },
+  1:     { chainId: '0x1',    chainName: 'Ethereum Mainnet', nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://ethereum.publicnode.com'],   blockExplorerUrls: ['https://etherscan.io']          },
   42161: { chainId: '0xa4b1', chainName: 'Arbitrum One',     nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://arb1.arbitrum.io/rpc'],      blockExplorerUrls: ['https://arbiscan.io']            },
   10:    { chainId: '0xa',    chainName: 'OP Mainnet',        nativeCurrency: { name: 'Ether',  symbol: 'ETH',   decimals: 18 }, rpcUrls: ['https://mainnet.optimism.io'],        blockExplorerUrls: ['https://optimistic.etherscan.io'] },
   137:   { chainId: '0x89',   chainName: 'Polygon Mainnet',  nativeCurrency: { name: 'MATIC',  symbol: 'MATIC', decimals: 18 }, rpcUrls: ['https://polygon-rpc.com'],            blockExplorerUrls: ['https://polygonscan.com']        },
@@ -155,10 +155,6 @@ export default function WalletProvider({ children }) {
       setAddress(accs[0]);
       setChainId(currentChain);
       localStorage.setItem('ufm_address', accs[0]);
-
-      if (currentChain !== 8453) {
-        try { await switchNetwork(8453); } catch { /* banner shows */ }
-      }
     } catch (err) {
       if (err.code === 4001) {
         setConnError(null);
@@ -171,6 +167,7 @@ export default function WalletProvider({ children }) {
   }
 
   const isConnected = Boolean(address);
+  const activeChainId = chainId;
   const isMainnet   = chainId === 1;
   const isBase      = chainId === 8453;
   const isSupported = SUPPORTED.includes(chainId ?? -1);
@@ -179,7 +176,7 @@ export default function WalletProvider({ children }) {
 
   return (
     <WalletContext.Provider value={{
-      address, chainId, chainName,
+      address, chainId, activeChainId, chainName,
       isConnected, isMainnet, isBase, isSupported,
       connecting, connError,
       isMobile, isInAppBrowser,

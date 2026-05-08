@@ -1,20 +1,55 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { addLiquidityToPool } from '../../lib/web3';
+import { addLiquidityToPool, getPublicClient, POSITION_MANAGER_BY_CHAIN } from '../../lib/web3';
 
 const BASE_CHAIN_ID = 8453;
 const NATIVE_ETH = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 
 const TOKEN_ADDR_BY_SYMBOL = {
   8453: {
-    ETH: NATIVE_ETH,
-    WETH: '0x4200000000000000000000000000000000000006',
-    USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    CBBTC: '0xcbB7C0000aB88B473b1f5a45fA9e8cEdaB6FeaA1',
-    cbBTC: '0xcbB7C0000aB88B473b1f5a45fA9e8cEdaB6FeaA1',
-    WBTC: '0xcbB7C0000aB88B473b1f5a45fA9e8cEdaB6FeaA1',
-    USDT: '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2',
+    ETH:   NATIVE_ETH,
+    WETH:  '0x4200000000000000000000000000000000000006',
+    USDC:  '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    CBBTC: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',
+    cbBTC: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',
+    WBTC:  '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',
+    USDT:  '0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2',
+  },
+  42161: {
+    ETH:   NATIVE_ETH,
+    WETH:  '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    USDC:  '0xaf88d065e77c8cC2239327C5EDb3A432268e5831',
+    USDT:  '0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9',
+    WBTC:  '0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f',
+    ARB:   '0x912CE59144191C1204E64559FE8253a0e49E6548',
+    DAI:   '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',
+  },
+  1: {
+    ETH:   NATIVE_ETH,
+    WETH:  '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2',
+    USDC:  '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    USDT:  '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    WBTC:  '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+    DAI:   '0x6B175474E89094C44Da98b954EedeAC495271d0F',
+    cbETH: '0xBe9895146f7AF43049ca1c1AE358B0541Ea49704',
+  },
+  10: {
+    ETH:   NATIVE_ETH,
+    WETH:  '0x4200000000000000000000000000000000000006',
+    USDC:  '0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85',
+    USDT:  '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58',
+    DAI:   '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1',
+    OP:    '0x4200000000000000000000000000000000000042',
+  },
+  137: {
+    MATIC: NATIVE_ETH,
+    POL:   NATIVE_ETH,
+    WETH:  '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619',
+    USDC:  '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
+    USDT:  '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    WBTC:  '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6',
+    DAI:   '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063',
   },
 };
 
@@ -73,62 +108,36 @@ function parsePoolTokens(pool) {
   ];
 }
 
-function padAddress(address) {
-  return String(address).toLowerCase().replace(/^0x/, '').padStart(64, '0');
-}
-
-async function ethCall(to, data) {
-  if (!window.ethereum) throw new Error('MetaMask não encontrada');
-  return window.ethereum.request({
-    method: 'eth_call',
-    params: [{ to, data }, 'latest'],
-  });
-}
-
-async function getErc20Decimals(tokenAddress, fallbackDecimals) {
-  try {
-    const result = await ethCall(tokenAddress, '0x313ce567');
-    const value = Number(BigInt(result));
-    return Number.isFinite(value) && value >= 0 ? value : fallbackDecimals;
-  } catch (error) {
-    console.warn('[Pool] decimals fallback:', tokenAddress, error?.message);
-    return fallbackDecimals;
-  }
-}
+const ERC20_MINI_ABI = [
+  { name: 'balanceOf', inputs: [{ name: 'account', type: 'address' }], outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+  { name: 'decimals',  inputs: [], outputs: [{ type: 'uint8' }], stateMutability: 'view', type: 'function' },
+];
 
 async function getTokenBalance({ token, tokenAddress, userAddress, chainId }) {
   const symbol = getTokenSymbol(token);
   const fallbackDecimals = TOKEN_DECIMALS_BY_SYMBOL[normalizeSymbol(symbol)] ?? 18;
+  const client = getPublicClient(chainId);
+
+  console.log('[balance] chainId:', chainId, '| token:', symbol, '| addr:', tokenAddress, '| user:', userAddress);
 
   if (isNativeToken(tokenAddress, symbol)) {
-    const rawHex = await window.ethereum.request({
-      method: 'eth_getBalance',
-      params: [userAddress, 'latest'],
-    });
-    const raw = BigInt(rawHex);
-    console.log('[Pool balance raw]', symbol, raw.toString());
-    return {
-      raw,
-      decimals: 18,
-      formatted: formatUnits(raw, 18),
-    };
+    const raw = await client.getBalance({ address: userAddress });
+    console.log('[balance] native', symbol, ':', raw.toString());
+    return { raw, decimals: 18, formatted: formatUnits(raw, 18) };
   }
 
   if (!isAddress(tokenAddress)) {
     throw new Error(`Endereço inválido para ${symbol} na chain ${chainId}`);
   }
 
-  const decimals = await getErc20Decimals(tokenAddress, fallbackDecimals);
-  const data = `0x70a08231${padAddress(userAddress)}`;
-  const rawHex = await ethCall(tokenAddress, data);
-  const raw = BigInt(rawHex);
-  console.log('[Pool balance raw]', symbol, raw.toString());
+  let decimals = fallbackDecimals;
+  try {
+    decimals = Number(await client.readContract({ address: tokenAddress, abi: ERC20_MINI_ABI, functionName: 'decimals' }));
+  } catch {}
 
-  return {
-    raw,
-    decimals,
-    formatted: formatUnits(raw, decimals),
-  };
+  const raw = await client.readContract({ address: tokenAddress, abi: ERC20_MINI_ABI, functionName: 'balanceOf', args: [userAddress] });
+  console.log('[balance] erc20', symbol, ':', raw.toString(), '| decimals:', decimals);
+  return { raw, decimals, formatted: formatUnits(raw, decimals) };
 }
 
 function formatUnits(value, decimals = 18) {
@@ -148,7 +157,13 @@ function toDisplay(value) {
   return n.toLocaleString('pt-BR', { maximumFractionDigits: 6 });
 }
 
-const POSITION_MANAGER_BASE = '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1';
+const EXPLORER_BY_CHAIN = {
+  1: 'https://etherscan.io',
+  42161: 'https://arbiscan.io',
+  10: 'https://optimistic.etherscan.io',
+  137: 'https://polygonscan.com',
+  8453: 'https://basescan.org',
+};
 
 const VALID_FEE_TIERS = [100, 500, 3000, 10000];
 
@@ -178,11 +193,16 @@ function encodeApprove(spender, amount) {
   return `0x095ea7b3${paddedSpender}${paddedAmount}`;
 }
 
-async function checkAllowanceRaw(tokenAddress, owner, spender) {
-  const paddedOwner = String(owner).toLowerCase().replace('0x', '').padStart(64, '0');
-  const paddedSpender = String(spender).toLowerCase().replace('0x', '').padStart(64, '0');
-  const result = await ethCall(tokenAddress, `0xdd62ed3e${paddedOwner}${paddedSpender}`);
-  return BigInt(result);
+async function checkAllowanceRaw(tokenAddress, owner, spender, chainId) {
+  const client = getPublicClient(chainId);
+  return client.readContract({
+    address: tokenAddress,
+    abi: [
+      { name: 'allowance', inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }], outputs: [{ type: 'uint256' }], stateMutability: 'view', type: 'function' },
+    ],
+    functionName: 'allowance',
+    args: [owner, spender],
+  });
 }
 
 async function waitForReceipt(txHash, maxMs = 120_000) {
@@ -341,8 +361,8 @@ export default function EnterPoolModal(props) {
 
     const mmChainHex = await window.ethereum?.request({ method: 'eth_chainId' }).catch(() => null);
     const mmChainId = mmChainHex ? parseInt(mmChainHex, 16) : null;
-    if (mmChainId !== BASE_CHAIN_ID) {
-      setEnterError(`Troque para Base (8453) no MetaMask. Rede atual: ${mmChainId ?? '?'}.`);
+    if (mmChainId !== poolChainId) {
+      setEnterError(`Troque para a rede da pool (${poolChainId}) no MetaMask. Rede atual: ${mmChainId ?? '?'}.`);
       return;
     }
 
@@ -356,11 +376,11 @@ export default function EnterPoolModal(props) {
     console.log('[Pool enter] amounts', { amount0, amount1 });
 
     try {
-      const spender = POSITION_MANAGER_BASE;
+      const spender = POSITION_MANAGER_BY_CHAIN[poolChainId] || POSITION_MANAGER_BY_CHAIN[1];
 
       if (hasAmt0 && isAddress(t0Addr) && !isNativeToken(t0Addr, symbol0)) {
         const amt0Wei = parseUnitsLocal(amount0, bal0?.decimals ?? 18);
-        const allowance0 = await checkAllowanceRaw(t0Addr, userAddress, spender);
+        const allowance0 = await checkAllowanceRaw(t0Addr, userAddress, spender, poolChainId);
         console.log('[Pool enter] token0 approve', { token: symbol0, addr: t0Addr, amount: amt0Wei.toString(), allowance: allowance0.toString() });
         if (allowance0 < amt0Wei) {
           setEnterStep('waitingSignature');
@@ -377,7 +397,7 @@ export default function EnterPoolModal(props) {
 
       if (hasAmt1 && isAddress(t1Addr) && !isNativeToken(t1Addr, symbol1)) {
         const amt1Wei = parseUnitsLocal(amount1, bal1?.decimals ?? 18);
-        const allowance1 = await checkAllowanceRaw(t1Addr, userAddress, spender);
+        const allowance1 = await checkAllowanceRaw(t1Addr, userAddress, spender, poolChainId);
         console.log('[Pool enter] token1 approve', { token: symbol1, addr: t1Addr, amount: amt1Wei.toString(), allowance: allowance1.toString() });
         if (allowance1 < amt1Wei) {
           setEnterStep('waitingSignature');
@@ -425,7 +445,7 @@ export default function EnterPoolModal(props) {
       console.log('[Pool mint params]', {
         token0: t0Addr, token1: t1Addr, fee, rangePercent,
         amount0Desired: amt0Wei.toString(), amount1Desired: amt1Wei.toString(),
-        chainId: BASE_CHAIN_ID,
+        chainId: poolChainId,
       });
 
       const { hash } = await addLiquidityToPool({
@@ -435,7 +455,7 @@ export default function EnterPoolModal(props) {
         amount0Desired: amt0Wei,
         amount1Desired: amt1Wei,
         rangePercent,
-        chainId:        BASE_CHAIN_ID,
+        chainId:        poolChainId,
       });
 
       console.log('[Pool mint tx]', hash);
@@ -470,7 +490,7 @@ export default function EnterPoolModal(props) {
           const storageKey = `flowfi.position.${wallet}.${tokenId ?? hash}`;
           localStorage.setItem(storageKey, JSON.stringify({
             tokenId,
-            chainId: BASE_CHAIN_ID,
+            chainId: poolChainId,
             token0: t0Addr,
             token1: t1Addr,
             symbol0,
@@ -733,7 +753,7 @@ export default function EnterPoolModal(props) {
                 <p className="font-semibold">Posição criada com sucesso!</p>
                 {enterTxHash && (
                   <a
-                    href={`https://basescan.org/tx/${enterTxHash}`}
+                    href={`${EXPLORER_BY_CHAIN[poolChainId] || EXPLORER_BY_CHAIN[8453]}/tx/${enterTxHash}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs underline text-emerald-300 hover:no-underline mt-0.5 block"
