@@ -7,7 +7,8 @@ function getToken() {
 
 async function request(path, options = {}) {
   const token = getToken();
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const url = `${BASE_URL}${path}`;
+  const res = await fetch(url, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -16,8 +17,23 @@ async function request(path, options = {}) {
     },
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  const text = await res.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!res.ok) {
+    const err = new Error(data?.error || data?.message || `HTTP ${res.status}`);
+    err.status = res.status;
+    err.statusText = res.statusText;
+    err.url = url;
+    err.path = path;
+    err.body = data;
+    throw err;
+  }
   return data;
 }
 
@@ -114,4 +130,9 @@ export const markAlertsRead = (alertIds) =>
 export const getSwapQuote = (params) => {
   const q = new URLSearchParams(params).toString();
   return request(`/api/swap/quote?${q}`);
+};
+
+export const getSwapQuoteEndpoint = (params) => {
+  const q = new URLSearchParams(params).toString();
+  return `${BASE_URL}/api/swap/quote?${q}`;
 };

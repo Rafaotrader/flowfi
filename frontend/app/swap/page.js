@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useWallet } from '../../components/common/WalletProvider';
-import { getSwapQuote } from '../../lib/api';
+import { getSwapQuote, getSwapQuoteEndpoint } from '../../lib/api';
 import {
   getPublicClient, getMetaMaskPublicClient, getWalletClient, checkERC20Allowance,
   approveERC20Token, ERC20_FULL_ABI,
@@ -46,10 +46,19 @@ const TOKEN_LIST = {
     { symbol: 'WETH',  address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', decimals: 18, name: 'Wrapped ETH' },
     { symbol: 'WBTC',  address: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6', decimals: 8,  name: 'Wrapped BTC' },
   ],
+  56: [
+    { symbol: 'BNB',   address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE', decimals: 18, name: 'BNB' },
+    { symbol: 'USDC',  address: '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', decimals: 18, name: 'USD Coin' },
+    { symbol: 'USDT',  address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18, name: 'Tether USD' },
+    { symbol: 'WBNB',  address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', decimals: 18, name: 'Wrapped BNB' },
+  ],
 };
 
 const CHAIN_NAMES = { 1: 'Ethereum', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 56: 'BNB' };
+const SWAP_ENABLED_CHAINS = new Set([1, 42161, 10, 137, 8453]);
 const ZEROX_ALLOWANCE_TARGET = '0xdef1c0ded9bec7f1a1670819833240f027b25eff'; // 0x Exchange Proxy
+const NATIVE_TOKEN_ADDRESS = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+const ZEROX_NATIVE_TOKEN = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 
 function fmtAmount(n, dec = 6) {
   if (!n) return '0';
@@ -72,15 +81,71 @@ function fmtBal(raw, dec) {
   return v >= 1000 ? v.toFixed(2) : v >= 1 ? v.toFixed(4) : v.toFixed(6);
 }
 
-// Safe parseUnits — trunca decimais extras para não lançar erro
-function toWei(amount, decimals) {
-  if (!amount || isNaN(parseFloat(amount))) return 0n;
+function normalizeAmountInput(value) {
+  const normalized = String(value || '').replace(',', '.').replace(/[^\d.]/g, '');
+  const firstDot = normalized.indexOf('.');
+  const cleaned = firstDot === -1
+    ? normalized
+    : normalized.slice(0, firstDot + 1) + normalized.slice(firstDot + 1).replace(/\./g, '');
+  const [wholeRaw = '', fracRaw = ''] = cleaned.split('.');
+  const whole = wholeRaw.replace(/^0+(?=\d)/, '') || (fracRaw ? '0' : '');
+  return fracRaw !== undefined && cleaned.includes('.') ? `${whole}.${fracRaw}` : whole;
+}
+
+function parseAmountToRaw(amount, decimals) {
+  const normalized = normalizeAmountInput(amount);
+  if (!normalized || normalized === '.') return { normalized, raw: 0n, error: 'Valor inválido.' };
+  if (!/^\d+(\.\d*)?$/.test(normalized)) return { normalized, raw: 0n, error: 'Valor inválido.' };
+  if (Number(normalized) <= 0) return { normalized, raw: 0n, error: null };
   try {
-    const [int, frac = ''] = amount.split('.');
-    return parseUnits(`${int}.${frac.slice(0, decimals)}`, decimals);
-  } catch {
-    return 0n;
+    const [int, frac = ''] = normalized.split('.');
+    const raw = parseUnits(`${int || '0'}.${frac.slice(0, decimals)}`, decimals);
+    return { normalized, raw, error: null };
+  } catch (err) {
+    return { normalized, raw: 0n, error: err.message || 'Valor inválido.' };
   }
+}
+
+function toWei(amount, decimals) {
+  return parseAmountToRaw(amount, decimals).raw;
+}
+
+function isNativeToken(token) {
+  return token?.address?.toLowerCase() === NATIVE_TOKEN_ADDRESS;
+}
+
+function tokenAddressFor0x(token) {
+  return isNativeToken(token) ? ZEROX_NATIVE_TOKEN : token.address;
+}
+
+function buildQuoteDebug({
+  chainId, walletChainId, address, sell, buy, sellAmt, parsedAmount, endpoint,
+  providerNetwork, provider, result, error,
+}) {
+  return {
+    activeChainId: chainId,
+    chainName: CHAIN_NAMES[chainId] || `Chain ${chainId}`,
+    walletChainId,
+    walletAddress: address || null,
+    tokenInSymbol: sell?.symbol,
+    tokenInAddress: sell?.address,
+    tokenIn0xAddress: sell ? tokenAddressFor0x(sell) : null,
+    tokenOutSymbol: buy?.symbol,
+    tokenOutAddress: buy?.address,
+    tokenOut0xAddress: buy ? tokenAddressFor0x(buy) : null,
+    inputAmountOriginal: sellAmt,
+    inputAmountNormalized: parsedAmount?.normalized,
+    amountRaw: parsedAmount?.raw?.toString?.() || null,
+    decimalsUsed: sell?.decimals,
+    providerNetwork,
+    quoteProvider: provider || null,
+    endpoint: endpoint || null,
+    httpStatus: error?.status || null,
+    httpStatusText: error?.statusText || null,
+    apiErrorBody: error?.body || null,
+    catchMessage: error?.message || null,
+    quoteResult: result || null,
+  };
 }
 
 // Converte decimal string ou BigInt para hex aceito pela MetaMask
@@ -157,10 +222,13 @@ async function getSwapEstimate(sellToken, buyToken, sellAmtHuman) {
 // Traduz erros de cotação para mensagem amigável
 function parseQuoteError(msg) {
   const m = (msg || '').toLowerCase();
+  if (m.includes('configure a chave') || m.includes('zerox_api_key') || m.includes('0x api key'))
+    return msg;
+  if (m.includes('swap ainda não disponível')) return 'Swap ainda não disponível nesta rede.';
   if (m.includes('liquidez') || m.includes('liquidity') || m.includes('rota'))
     return 'Não encontramos rota para esse par agora. Tente outro valor ou par.';
   if (m.includes('configurado') || m.includes('api') || m.includes('503'))
-    return 'Serviço temporariamente indisponível. Tente novamente em instantes.';
+    return msg;
   if (m.includes('expirou') || m.includes('timeout'))
     return 'Cotação expirou — tente novamente.';
   if (m.includes('saldo') || m.includes('funds'))
@@ -171,8 +239,13 @@ function parseQuoteError(msg) {
 export default function SwapPage() {
   const { address, activeChainId, chainId, isConnected, connect } = useWallet();
   const currentChainId = activeChainId || chainId || 8453;
+  const hasTokenList = Boolean(TOKEN_LIST[currentChainId]);
+  const isSwapSupported = hasTokenList && SWAP_ENABLED_CHAINS.has(currentChainId);
+  const showSwapDebug = process.env.NODE_ENV === 'development'
+    || process.env.NEXT_PUBLIC_SWAP_DEBUG === 'true'
+    || (typeof window !== 'undefined' && window.localStorage?.getItem('flowfy_swap_debug') === '1');
 
-  const tokens  = TOKEN_LIST[currentChainId] || TOKEN_LIST[8453];
+  const tokens  = hasTokenList ? TOKEN_LIST[currentChainId] : TOKEN_LIST[8453];
   const [sell,  setSell]  = useState(tokens[0]);
   const [buy,   setBuy]   = useState(tokens[1]);
   const [sellAmt, setSellAmt] = useState('');
@@ -184,8 +257,10 @@ export default function SwapPage() {
   const [txError, setTxError] = useState(null);
   const [sellBal, setSellBal] = useState(null); // BigInt
   const [buyBal,  setBuyBal]  = useState(null); // BigInt
+  const [balancesLoading, setBalancesLoading] = useState(false);
   const [balanceTick, setBalanceTick] = useState(0); // increment to force refetch
   const [gasBlockOverride, setGasBlockOverride] = useState(false);
+  const [quoteDebug, setQuoteDebug] = useState(null);
 
   // Reset tokens + state when chain changes
   useEffect(() => {
@@ -193,17 +268,26 @@ export default function SwapPage() {
     setSell(list[0]);
     setBuy(list[1]);
     setQuote(null);
+    setQuoteDebug(null);
     setSellAmt('');
+    setSellBal(null);
+    setBuyBal(null);
+    setBalancesLoading(false);
+    setError(isSwapSupported ? null : 'Swap ainda não disponível nesta rede.');
     setTxStep('idle');
     setTxError(null);
     setTxHash(null);
     setGasBlockOverride(false);
-  }, [currentChainId]);
+  }, [currentChainId, isSwapSupported]);
 
   // Reset quote + tx state when wallet address changes
   useEffect(() => {
     setQuote(null);
+    setQuoteDebug(null);
     setSellAmt('');
+    setSellBal(null);
+    setBuyBal(null);
+    setBalancesLoading(false);
     setTxStep('idle');
     setTxError(null);
     setTxHash(null);
@@ -213,34 +297,80 @@ export default function SwapPage() {
 
   // Fetch wallet balances — cancelled flag prevents stale state on rapid changes
   useEffect(() => {
-    if (!address || !isConnected) { setSellBal(null); setBuyBal(null); return; }
+    if (!address || !isConnected || !isSwapSupported) { setSellBal(null); setBuyBal(null); setBalancesLoading(false); return; }
     let cancelled = false;
+    setBalancesLoading(true);
     const cid = currentChainId;
     const client = getMetaMaskPublicClient(cid);
-    const NATIVE = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
     async function fetchBal(token) {
       console.log('[balance] chainId', cid);
       console.log('[balance] token', token);
       console.log('[balance] address', address);
-      const raw = token.address.toLowerCase() === NATIVE
+      if (typeof window !== 'undefined' && window.ethereum) {
+        const providerChainHex = await window.ethereum.request({ method: 'eth_chainId' }).catch(() => null);
+        console.log('[balance] provider network', providerChainHex ? parseInt(providerChainHex, 16) : null);
+      }
+      const raw = isNativeToken(token)
         ? await client.getBalance({ address })
         : await client.readContract({ address: token.address, abi: ERC20_FULL_ABI, functionName: 'balanceOf', args: [address] });
       console.log('[balance] raw', raw.toString());
       console.log('[balance] formatted', formatUnits(raw, token.decimals));
       return raw;
     }
-    fetchBal(sell).then(v => { if (!cancelled) setSellBal(v); }).catch(() => { if (!cancelled) setSellBal(null); });
-    fetchBal(buy).then(v  => { if (!cancelled) setBuyBal(v);  }).catch(() => { if (!cancelled) setBuyBal(null);  });
+    Promise.allSettled([fetchBal(sell), fetchBal(buy)])
+      .then(([sellResult, buyResult]) => {
+        if (cancelled) return;
+        setSellBal(sellResult.status === 'fulfilled' ? sellResult.value : null);
+        setBuyBal(buyResult.status === 'fulfilled' ? buyResult.value : null);
+      })
+      .finally(() => { if (!cancelled) setBalancesLoading(false); });
     return () => { cancelled = true; };
-  }, [address, isConnected, sell, buy, currentChainId, balanceTick]);
+  }, [address, isConnected, isSwapSupported, sell, buy, currentChainId, balanceTick]);
 
   // fetchQuote must be defined BEFORE the debounced useEffect that uses it in deps
   const fetchQuote = useCallback(async () => {
-    if (!sellAmt || parseFloat(sellAmt) <= 0) return;
-    const sellAmountWei = toWei(sellAmt, sell.decimals);
+    const parsedAmount = parseAmountToRaw(sellAmt, sell.decimals);
+    let providerNetwork = null;
+    if (typeof window !== 'undefined' && window.ethereum) {
+      const providerChainHex = await window.ethereum.request({ method: 'eth_chainId' }).catch(() => null);
+      providerNetwork = providerChainHex ? parseInt(providerChainHex, 16) : null;
+    }
+
+    const baseDebug = (patch = {}) => buildQuoteDebug({
+      chainId: currentChainId,
+      walletChainId: chainId,
+      address,
+      sell,
+      buy,
+      sellAmt,
+      parsedAmount,
+      providerNetwork,
+      ...patch,
+    });
+
+    if (!sellAmt || parsedAmount.error || parsedAmount.raw <= 0n) {
+      setQuote(null);
+      setQuoteDebug(baseDebug({ error: parsedAmount.error ? new Error(parsedAmount.error) : null }));
+      return;
+    }
+    if (balancesLoading) {
+      setQuote(null);
+      setQuoteDebug(baseDebug({ error: new Error('Saldo ainda carregando; quote pausada.') }));
+      return;
+    }
+    if (!isSwapSupported) {
+      setQuote(null);
+      setError('Swap ainda não disponível nesta rede.');
+      const dbg = baseDebug({ error: new Error('Swap ainda não disponível nesta rede.') });
+      setQuoteDebug(dbg);
+      console.warn('[Flowfy Swap Debug] unsupported swap chain', dbg);
+      return;
+    }
+    const sellAmountWei = parsedAmount.raw;
     if (sellAmountWei === 0n) return;
     setLoading(true);
     setError(null);
+    setQuoteDebug(baseDebug());
     console.group('[Flowfy Swap] fetchQuote');
     console.group('[Flowfy Swap Debug]');
     console.log('activeChainId:', currentChainId);
@@ -248,12 +378,14 @@ export default function SwapPage() {
     console.log('sellToken:', sell);
     console.log('buyToken:', buy);
     console.log('sellAmount:', sellAmt);
+    console.log('normalizedAmount:', parsedAmount.normalized);
     console.log('decimals:', sell.decimals);
     console.log('amountInRaw:', sellAmountWei.toString());
+    console.log('provider network:', providerNetwork);
     console.groupEnd();
     console.log('Tokens:', sell.symbol, '→', buy.symbol, '| Amount:', sellAmt, '| Chain:', currentChainId);
     try {
-      const qty         = parseFloat(sellAmt) || 0;
+      const qty         = parseFloat(parsedAmount.normalized) || 0;
       const sym         = sell.symbol.toUpperCase();
       const tradeUsdEst = (sym === 'USDC' || sym === 'USDT') ? qty
         : (sym === 'ETH' || sym === 'WETH') ? qty * 3000 : 0;
@@ -261,22 +393,42 @@ export default function SwapPage() {
         ? 'Uniswap_V2,Curve,Balancer_V2' : undefined;
 
       let data;
+      let zeroXError = null;
+      const zeroXParams = {
+        chainId: currentChainId,
+        sellToken: tokenAddressFor0x(sell),
+        buyToken:  tokenAddressFor0x(buy),
+        sellAmount: sellAmountWei.toString(),
+        ...(address && { takerAddress: address }),
+        ...(excludedSources && { excludedSources }),
+      };
+      const zeroXEndpoint = getSwapQuoteEndpoint(zeroXParams);
 
       // Tier 1: 0x backend
       try {
         console.log('[Tier 1] Tentando 0x backend…');
-        data = await getSwapQuote({
-          chainId: currentChainId,
-          sellToken: sell.address,
-          buyToken:  buy.address,
-          sellAmount: sellAmountWei.toString(),
-          ...(address && { takerAddress: address }),
-          ...(excludedSources && { excludedSources }),
-        });
+        console.log('[Tier 1] endpoint:', zeroXEndpoint);
+        data = await getSwapQuote(zeroXParams);
         data._source = '0x';
         console.log('[Tier 1] ✓ 0x OK | buyAmount:', data.buyAmount);
       } catch (e0x) {
-        console.warn('[Tier 1] ✗ 0x falhou:', e0x.message);
+        zeroXError = e0x;
+        console.warn('[Tier 1] ✗ 0x falhou:', e0x);
+        const msg = `${e0x?.message || ''} ${e0x?.body?.detail || ''}`.toLowerCase();
+        const isConfigError = e0x?.status === 401 || e0x?.status === 403
+          || (e0x?.status === 503 && msg.includes('zerox_api_key'))
+          || (msg.includes('zero') && msg.includes('api') && msg.includes('key'))
+          || (msg.includes('0x') && msg.includes('api') && msg.includes('key'))
+          || msg.includes('swap não configurado') || msg.includes('swap nao configurado');
+
+        if (isConfigError) {
+          const configError = new Error('Cotação indisponível: configure a chave da API 0x.');
+          configError.status = e0x.status;
+          configError.statusText = e0x.statusText;
+          configError.url = zeroXEndpoint;
+          configError.body = e0x.body;
+          throw configError;
+        }
 
         // Tier 2: Uniswap V3 QuoterV2 on-chain (no API key)
         try {
@@ -285,42 +437,50 @@ export default function SwapPage() {
           data._source = 'uniswap';
           console.log('[Tier 2] ✓ UniV3 OK | buyAmount:', data.buyAmount, '| fee:', data.fee);
         } catch (eUni) {
-          console.warn('[Tier 2] ✗ UniV3 falhou:', eUni.message);
-
-          // Tier 3: CoinGecko price estimation (non-executable)
-          try {
-            console.log('[Tier 3] Tentando estimativa CoinGecko…');
-            data = await getSwapEstimate(sell, buy, qty);
-            console.log('[Tier 3] ✓ CoinGecko OK | estimatedOut:', data.buyAmount);
-          } catch (eCG) {
-            console.error('[Tier 3] ✗ CoinGecko falhou:', eCG.message);
-            throw new Error('Nenhuma cotação disponível agora. Tente novamente em instantes.');
-          }
+          console.warn('[Tier 2] ✗ UniV3 falhou:', eUni);
+          const combined = new Error(`0x falhou: ${zeroXError?.message || 'erro desconhecido'} | Uniswap V3 falhou: ${eUni?.message || 'erro desconhecido'}`);
+          combined.status = zeroXError?.status || null;
+          combined.statusText = zeroXError?.statusText || null;
+          combined.url = zeroXEndpoint;
+          combined.body = {
+            zeroX: zeroXError?.body || null,
+            zeroXMessage: zeroXError?.message || null,
+            uniswapMessage: eUni?.message || null,
+          };
+          throw combined;
         }
       }
 
       console.log('[Flowfy Swap Debug] quote provider:', data._source || (data.isUniswapDirect ? 'uniswap' : '0x'));
       console.log('[Flowfy Swap Debug] quote result:', data);
+      setQuoteDebug(baseDebug({ endpoint: zeroXEndpoint, provider: data._source || (data.isUniswapDirect ? 'uniswap' : '0x'), result: data }));
       setQuote(data);
     } catch (err) {
       console.error('[Flowfy Swap Debug] error real:', err);
+      setQuoteDebug(baseDebug({ endpoint: err.url || null, error: err }));
       setError(err.message);
       setQuote(null);
     } finally {
       setLoading(false);
       console.groupEnd();
     }
-  }, [sellAmt, sell, buy, currentChainId, chainId, address]);
+  }, [sellAmt, sell, buy, balancesLoading, isSwapSupported, currentChainId, chainId, address]);
 
   // Debounced quote fetch — fetchQuote in deps so takerAddress is always current
   useEffect(() => {
-    if (!sellAmt || parseFloat(sellAmt) <= 0) { setQuote(null); return; }
+    const parsedAmount = parseAmountToRaw(sellAmt, sell.decimals);
+    if (!sellAmt || parsedAmount.error || parsedAmount.raw <= 0n || balancesLoading) { setQuote(null); return; }
     const timer = setTimeout(fetchQuote, 600);
     return () => clearTimeout(timer);
-  }, [sellAmt, sell, buy, currentChainId, fetchQuote]);
+  }, [sellAmt, sell, buy, currentChainId, balancesLoading, fetchQuote]);
 
   const executeSwap = useCallback(async () => {
     if (!quote || !address) return;
+    if (!isSwapSupported) {
+      setTxError('Swap ainda não disponível nesta rede.');
+      setTxStep('error');
+      return;
+    }
 
     // ── Uniswap V3 path (fallback quando backend 0x indisponível) ──
     if (quote.isUniswapDirect) {
@@ -334,7 +494,8 @@ export default function SwapPage() {
         const sellAmtWei = toWei(sellAmt, sell.decimals);
 
         if (!isETH) {
-          const routerAddr = SWAP_ROUTER_BY_CHAIN[cid] || SWAP_ROUTER_BY_CHAIN[8453];
+          const routerAddr = SWAP_ROUTER_BY_CHAIN[cid];
+          if (!routerAddr) throw new Error('Swap ainda não disponível nesta rede.');
           const allowance = await checkERC20Allowance(sell.address, address, routerAddr, cid);
           if (allowance < sellAmtWei) {
             setTxStep('approving');
@@ -504,7 +665,7 @@ export default function SwapPage() {
       setTxError(parseSwapError(err));
       setTxStep('error');
     }
-  }, [quote, address, currentChainId, chainId, sell, buy, sellAmt]);
+  }, [quote, address, isSwapSupported, currentChainId, chainId, sell, buy, sellAmt]);
 
   // Verifica receipt de tx pendente — chamado pelo botão "Verificar novamente"
   const verifyTx = useCallback(async () => {
@@ -624,15 +785,23 @@ export default function SwapPage() {
             </select>
           </div>
           <input
-            type="number" min="0" step="any" placeholder="0.00"
+            type="text" inputMode="decimal" placeholder="0.00"
             value={sellAmt}
-            onChange={e => { setSellAmt(e.target.value); setQuote(null); setTxStep('idle'); setTxError(null); setTxHash(null); setGasBlockOverride(false); }}
+            onChange={e => {
+              setSellAmt(normalizeAmountInput(e.target.value));
+              setQuote(null);
+              setTxStep('idle');
+              setTxError(null);
+              setTxHash(null);
+              setGasBlockOverride(false);
+            }}
+            onBlur={e => setSellAmt(normalizeAmountInput(e.target.value))}
             className="w-full bg-transparent text-2xl font-bold text-white outline-none placeholder-slate-700"
           />
           {isConnected && (
             <div className="flex items-center justify-between mt-2">
               <span className={`text-xs ${hasInsufficientBalance ? 'text-red-400' : 'text-slate-600'}`}>
-                Saldo: {sellBal != null ? `${fmtBal(sellBal, sell.decimals)} ${sell.symbol}` : '—'}
+                Saldo: {balancesLoading ? 'carregando...' : sellBal != null ? `${fmtBal(sellBal, sell.decimals)} ${sell.symbol}` : '—'}
               </span>
               {sellBal != null && sellBal > 0n && (
                 <button
@@ -826,19 +995,47 @@ export default function SwapPage() {
         {error && (
           <div className="rounded-xl p-4 text-sm space-y-2 border bg-red-950/20 border-red-800/40 text-red-300">
             <p className="font-medium">
-              {error.toLowerCase().includes('liquidez') || error.toLowerCase().includes('rota') || error.toLowerCase().includes('liquidity')
+              {error === 'Swap ainda não disponível nesta rede.'
+                ? 'Rede sem swap'
+                : error.toLowerCase().includes('liquidez') || error.toLowerCase().includes('rota') || error.toLowerCase().includes('liquidity')
                 ? 'Rota indisponível'
                 : error.toLowerCase().includes('funds') || error.toLowerCase().includes('saldo')
                 ? 'Saldo insuficiente'
                 : 'Erro ao buscar cotação'}
             </p>
             <p className="text-xs opacity-80">{parseQuoteError(error)}</p>
+            {quoteDebug?.apiErrorBody?.detail && (
+              <p className="text-xs opacity-80">Detalhe API: {quoteDebug.apiErrorBody.detail}</p>
+            )}
             <button
               onClick={() => { setError(null); fetchQuote(); }}
+              disabled={!isSwapSupported}
               className="text-xs text-red-300 underline"
             >
               Tentar novamente
             </button>
+          </div>
+        )}
+
+        {showSwapDebug && quoteDebug && (
+          <div className="rounded-xl p-3 text-xs border border-sky-800/40 bg-sky-950/20 text-sky-200 space-y-2">
+            <p className="font-semibold">Debug temporário da cotação</p>
+            <div className="grid grid-cols-1 gap-1 text-sky-100/80">
+              <p><span className="text-sky-400">chain:</span> {quoteDebug.activeChainId} ({quoteDebug.chainName})</p>
+              <p><span className="text-sky-400">wallet:</span> {quoteDebug.walletAddress || 'desconectada'}</p>
+              <p><span className="text-sky-400">tokenIn:</span> {quoteDebug.tokenInSymbol} · {quoteDebug.tokenInAddress}</p>
+              <p><span className="text-sky-400">tokenOut:</span> {quoteDebug.tokenOutSymbol} · {quoteDebug.tokenOutAddress}</p>
+              <p><span className="text-sky-400">input:</span> {quoteDebug.inputAmountOriginal} → {quoteDebug.inputAmountNormalized} · raw {quoteDebug.amountRaw}</p>
+              <p><span className="text-sky-400">decimals/provider:</span> {quoteDebug.decimalsUsed} · {quoteDebug.providerNetwork ?? 'n/a'}</p>
+              <p className="break-all"><span className="text-sky-400">endpoint:</span> {quoteDebug.endpoint || 'n/a'}</p>
+              <p><span className="text-sky-400">HTTP:</span> {quoteDebug.httpStatus || 'n/a'} {quoteDebug.httpStatusText || ''}</p>
+              {quoteDebug.catchMessage && <p><span className="text-sky-400">catch:</span> {quoteDebug.catchMessage}</p>}
+            </div>
+            {quoteDebug.apiErrorBody && (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg bg-black/30 p-2 text-[11px] text-sky-100">
+                {JSON.stringify(quoteDebug.apiErrorBody, null, 2)}
+              </pre>
+            )}
           </div>
         )}
 
@@ -918,6 +1115,7 @@ export default function SwapPage() {
           <button
             onClick={executeSwap}
             disabled={
+              !isSwapSupported ||
               !quote || loading || hasInsufficientBalance ||
               quote?.isEstimated ||
               (gasInfo?.level === 'inviável' && !gasBlockOverride) ||
@@ -929,7 +1127,8 @@ export default function SwapPage() {
           >
             {(txStep === 'approving' || txStep === 'signing' || txStep === 'swapping' || txStep === 'confirming' || txStep === 'refreshingQuote') ? (
               <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Aguarde…</>
-            ) : loading ? 'Buscando cotação…'
+            ) : !isSwapSupported ? 'Swap ainda não disponível nesta rede.'
+              : loading ? 'Buscando cotação…'
               : hasInsufficientBalance ? `Saldo insuficiente de ${sell.symbol}`
               : !quote ? 'Insira um valor para cotar'
               : quote?.isEstimated ? 'Aguardando cotação executável'

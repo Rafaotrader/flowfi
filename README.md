@@ -54,7 +54,7 @@ npm run dev
 ```bash
 cd backend
 cp .env.example .env
-# adicione sua GRAPH_API_KEY no .env
+# adicione sua ZEROX_API_KEY e, se necessario, GRAPH_API_KEY no .env
 npm install
 npm run dev
 # disponível em http://localhost:5001
@@ -70,9 +70,14 @@ Copie `frontend/.env.example` para `frontend/.env.local` e preencha:
 |---|---|
 | `NEXT_PUBLIC_API_URL` | URL do backend (vazio = sem backend) |
 | `NEXT_PUBLIC_CHAIN_ID` | Chain ID padrão (8453 = Base) |
-| `NEXT_PUBLIC_ZEROX_API_KEY` | Chave 0x para cotações de swap |
 | `NEXT_PUBLIC_PLATFORM_WALLET` | Carteira que recebe a taxa da plataforma |
 | `NEXT_PUBLIC_HARVESTER_ADDRESS` | Endereço do contrato FlowfyHarvester após deploy |
+
+### Configuracao da cotacao 0x
+
+O swap real depende da variavel `ZEROX_API_KEY` configurada no backend. Em desenvolvimento local, copie `backend/.env.example` para `backend/.env` e preencha `ZEROX_API_KEY` com sua chave da 0x. Em producao, configure a mesma variavel nas Environment Variables da Vercel para Production, Preview e Development.
+
+Nunca versione uma chave real. Arquivos `.env`, `.env.local`, `backend/.env`, `backend/.env.local`, `frontend/.env`, `frontend/.env.local` e `.vercel` devem permanecer ignorados pelo Git.
 
 ---
 

@@ -3,6 +3,12 @@
 .env.local
 .env.production
 .env.*.local
+backend/.env
+backend/.env.local
+frontend/.env
+frontend/.env.local
+.vercel
+**/.vercel/
 
 # Build output
 artifacts/

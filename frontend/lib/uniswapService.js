@@ -12,7 +12,7 @@ import {
   getPublicClient,
   getWalletClient,
   CHAINS,
-  POSITION_MANAGER_BY_CHAIN,
+  getPositionManagerAddress,
   POSITION_MANAGER_ABI,
   checkERC20Allowance,
   approveERC20Token,
@@ -109,7 +109,7 @@ export async function addLiquidity({
 export async function removeLiquidity({ tokenId, liquidity, chainId = 8453 }) {
   const walletClient = await getWalletClient(chainId);
   const [account]    = await walletClient.getAddresses();
-  const nftAddr      = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr      = getPositionManagerAddress(chainId);
 
   const hash = await walletClient.writeContract({
     account,
@@ -145,7 +145,7 @@ export async function removeLiquidity({ tokenId, liquidity, chainId = 8453 }) {
 export async function collectFees({ tokenId, recipient, chainId = 8453 }) {
   const walletClient = await getWalletClient(chainId);
   const [account]    = await walletClient.getAddresses();
-  const nftAddr      = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr      = getPositionManagerAddress(chainId);
 
   const hash = await walletClient.writeContract({
     account,

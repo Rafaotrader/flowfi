@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { addLiquidityToPool, getPublicClient, POSITION_MANAGER_BY_CHAIN } from '../../lib/web3';
+import { addLiquidityToPool, getPositionManagerAddress, getPublicClient } from '../../lib/web3';
 
 const BASE_CHAIN_ID = 8453;
 const NATIVE_ETH = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
@@ -85,7 +85,7 @@ function resolveTokenAddress(token, chainId = BASE_CHAIN_ID) {
   if (isAddress(direct)) return direct;
 
   const symbol = normalizeSymbol(token?.symbol || token?.ticker || token?.name);
-  const map = TOKEN_ADDR_BY_SYMBOL[chainId] || TOKEN_ADDR_BY_SYMBOL[BASE_CHAIN_ID];
+  const map = TOKEN_ADDR_BY_SYMBOL[chainId];
   return map?.[symbol] || null;
 }
 
@@ -163,6 +163,14 @@ const EXPLORER_BY_CHAIN = {
   10: 'https://optimistic.etherscan.io',
   137: 'https://polygonscan.com',
   8453: 'https://basescan.org',
+};
+const CHAIN_NAME_BY_ID = {
+  1: 'Ethereum',
+  42161: 'Arbitrum',
+  10: 'Optimism',
+  137: 'Polygon',
+  8453: 'Base',
+  56: 'BNB',
 };
 
 const VALID_FEE_TIERS = [100, 500, 3000, 10000];
@@ -376,7 +384,7 @@ export default function EnterPoolModal(props) {
     console.log('[Pool enter] amounts', { amount0, amount1 });
 
     try {
-      const spender = POSITION_MANAGER_BY_CHAIN[poolChainId] || POSITION_MANAGER_BY_CHAIN[1];
+      const spender = getPositionManagerAddress(poolChainId);
 
       if (hasAmt0 && isAddress(t0Addr) && !isNativeToken(t0Addr, symbol0)) {
         const amt0Wei = parseUnitsLocal(amount0, bal0?.decimals ?? 18);
@@ -523,7 +531,7 @@ export default function EnterPoolModal(props) {
   };
 
   const inProgress = enterStep === 'approving' || enterStep === 'waitingSignature' || enterStep === 'submitted' || enterStep === 'minting';
-  const enterDisabled = !userAddress || (!amount0 && !amount1) || loadingBalances || inProgress;
+  const enterDisabled = !hasAddrs || !userAddress || (!amount0 && !amount1) || loadingBalances || inProgress;
 
   // Step progress labels
   const STEPS = [
@@ -562,7 +570,7 @@ export default function EnterPoolModal(props) {
               <span className="gradient-text">{symbol0}/{symbol1}</span>
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Posição de liquidez · {pool?.feeTierLabel || pool?.feeTier || '0.05%'} · {pool?.networkName || 'Base'}
+              Posição de liquidez · {pool?.feeTierLabel || pool?.feeTier || '0.05%'} · {pool?.networkName || CHAIN_NAME_BY_ID[poolChainId] || `Chain ${poolChainId}`}
             </p>
           </div>
           <button
@@ -616,6 +624,13 @@ export default function EnterPoolModal(props) {
             <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-800/40 rounded-xl p-3 text-xs text-amber-300">
               <span className="shrink-0 mt-0.5">⚠</span>
               <span>{chainWarning}</span>
+            </div>
+          )}
+
+          {!hasAddrs && (
+            <div className="flex items-start gap-2 bg-red-950/30 border border-red-900/40 rounded-xl p-3 text-xs text-red-300">
+              <span className="shrink-0 mt-0.5">✕</span>
+              <span>Tokens da pool não estão configurados para a rede {poolChainId}. Saldo e entrada na pool foram bloqueados para evitar usar endereço de outra rede.</span>
             </div>
           )}
 

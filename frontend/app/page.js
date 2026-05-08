@@ -24,7 +24,8 @@ function fmtUSD(n) {
 }
 
 export default function DashboardPage() {
-  const { address, chainId, isConnected, connect } = useWallet();
+  const { address, activeChainId, chainId, isConnected, connect } = useWallet();
+  const currentChainId = activeChainId || chainId || null;
 
   const [network,    setNetwork]    = useState('global');
   const [pools,      setPools]      = useState([]);
@@ -73,28 +74,39 @@ export default function DashboardPage() {
 
   // Sync wallet chain
   useEffect(() => {
-    if (chainId && [1, 42161, 10, 137, 8453, 56].includes(chainId)) {
-      setNetwork(String(chainId));
+    if (currentChainId && [1, 42161, 10, 137, 8453, 56].includes(currentChainId)) {
+      setNetwork(String(currentChainId));
     }
-  }, [chainId]);
+  }, [currentChainId]);
+
+  useEffect(() => {
+    setPositions(null);
+    setSelectedPool(null);
+    setGasGwei(null);
+  }, [address, currentChainId]);
 
   // Load positions when wallet connected
   useEffect(() => {
-    if (!address) { setPositions(null); return; }
+    if (!address || !currentChainId) { setPositions(null); return; }
+    let cancelled = false;
     setPosLoading(true);
-    getPositionsForAddress(address, chainId || 8453)
-      .then(result => setPositions(Array.isArray(result) ? result : (result?.positions ?? [])))
-      .catch(() => setPositions([]))
-      .finally(() => setPosLoading(false));
-  }, [address, chainId]);
+    getPositionsForAddress(address, currentChainId)
+      .then(result => { if (!cancelled) setPositions(Array.isArray(result) ? result : (result?.positions ?? [])); })
+      .catch(() => { if (!cancelled) setPositions([]); })
+      .finally(() => { if (!cancelled) setPosLoading(false); });
+    return () => { cancelled = true; };
+  }, [address, currentChainId]);
 
   // Fetch gas price
   useEffect(() => {
-    const cid = chainId || 8453;
+    if (!currentChainId) { setGasGwei(null); return; }
+    let cancelled = false;
+    const cid = currentChainId;
     getPublicClient(cid).getGasPrice()
-      .then(p => setGasGwei(Math.round(Number(p) / 1e6) / 1e3))
+      .then(p => { if (!cancelled) setGasGwei(Math.round(Number(p) / 1e6) / 1e3); })
       .catch(() => {});
-  }, [chainId]);
+    return () => { cancelled = true; };
+  }, [currentChainId]);
 
   const positionsArray = Array.isArray(positions)
     ? positions

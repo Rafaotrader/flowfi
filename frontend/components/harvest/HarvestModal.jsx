@@ -4,8 +4,16 @@ import { harvestPreview, confirmHarvest } from '../../lib/api';
 import { executeHarvest, readAccruedFees, checkNftApproval, approveHarvester } from '../../lib/web3';
 
 const HARVESTER_ADDRESS = process.env.NEXT_PUBLIC_HARVESTER_ADDRESS;
+const EXPLORER_BY_CHAIN = {
+  1: 'https://etherscan.io',
+  42161: 'https://arbiscan.io',
+  10: 'https://optimistic.etherscan.io',
+  137: 'https://polygonscan.com',
+  8453: 'https://basescan.org',
+  56: 'https://bscscan.com',
+};
 
-export default function HarvestModal({ position, onClose, onSuccess }) {
+export default function HarvestModal({ position, chainId = 8453, ownerAddress, onClose, onSuccess }) {
   const [step, setStep] = useState('idle'); // idle | loading_fees | preview | approving | confirming | success | error
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState(null);
@@ -17,13 +25,14 @@ export default function HarvestModal({ position, onClose, onSuccess }) {
     setError(null);
     try {
       // Lê fees acumulados diretamente da blockchain (fonte de verdade)
-      const { amount0, amount1 } = await readAccruedFees(position.token_id);
+      const tokenId = position.token_id || position.tokenId;
+      const { amount0, amount1 } = await readAccruedFees(tokenId, ownerAddress, chainId);
 
       // Calcula split via backend canônico (/api/harvest/preview)
       const dec0 = position.decimals0 ?? 18;
       const dec1 = position.decimals1 ?? 18;
       const data = await harvestPreview({
-        tokenId:      position.token_id,
+        tokenId,
         amount0:      Number(amount0) / 10 ** dec0,
         amount1:      Number(amount1) / 10 ** dec1,
         token0Symbol: position.token0_symbol,
@@ -45,14 +54,15 @@ export default function HarvestModal({ position, onClose, onSuccess }) {
     setError(null);
     try {
       // Verifica se o contrato já tem aprovação para o NFT; solicita se não tiver
-      const isApproved = await checkNftApproval(position.token_id, HARVESTER_ADDRESS);
+      const tokenId = position.token_id || position.tokenId;
+      const isApproved = await checkNftApproval(tokenId, HARVESTER_ADDRESS, chainId);
       if (!isApproved) {
         setStep('approving');
-        await approveHarvester(position.token_id, HARVESTER_ADDRESS);
+        await approveHarvester(tokenId, HARVESTER_ADDRESS, chainId);
         setStep('confirming');
       }
 
-      const { hash } = await executeHarvest(position.token_id, HARVESTER_ADDRESS);
+      const { hash } = await executeHarvest(tokenId, HARVESTER_ADDRESS, chainId);
       setTxHash(hash);
 
       await confirmHarvest({
@@ -80,6 +90,7 @@ export default function HarvestModal({ position, onClose, onSuccess }) {
   }
 
   const canExecute = Boolean(HARVESTER_ADDRESS);
+  const explorer = EXPLORER_BY_CHAIN[chainId] || EXPLORER_BY_CHAIN[8453];
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
@@ -211,12 +222,12 @@ export default function HarvestModal({ position, onClose, onSuccess }) {
               <p className="font-semibold text-emerald-400">Harvest realizado com sucesso!</p>
               {txHash && (
                 <a
-                  href={`https://basescan.org/tx/${txHash}`}
+                  href={`${explorer}/tx/${txHash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-violet-400 text-sm hover:underline"
                 >
-                  Ver no Basescan →
+                  Ver no explorer →
                 </a>
               )}
               <button onClick={onClose} className="btn-primary w-full mt-4">Fechar</button>

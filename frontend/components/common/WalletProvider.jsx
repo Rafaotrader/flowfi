@@ -85,10 +85,15 @@ export default function WalletProvider({ children }) {
       .catch(() => {});
 
     const onAccounts = (accs) => {
+      console.log('[wallet] accountsChanged', accs?.[0] || null);
       if (!accs?.length) disconnect();
       else { setAddress(accs[0]); localStorage.setItem('ufm_address', accs[0]); }
     };
-    const onChain = (hex) => setChainId(parseInt(hex, 16));
+    const onChain = (hex) => {
+      const nextChainId = parseInt(hex, 16);
+      console.log('[wallet] chainChanged', { activeChainId: nextChainId, walletChainId: nextChainId });
+      setChainId(nextChainId);
+    };
 
     window.ethereum.on('accountsChanged', onAccounts);
     window.ethereum.on('chainChanged',   onChain);

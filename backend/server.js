@@ -587,16 +587,17 @@ app.get('/api/swap/quote', async (req, res) => {
     return res.status(503).json({
       error: 'Swap não configurado',
       detail: 'Adicione ZEROX_API_KEY em backend/.env. Obtenha grátis em https://dashboard.0x.org',
+      code: 'ZEROX_API_KEY_MISSING',
     });
   }
 
-  const { chainId = '8453', sellToken, buyToken, sellAmount, takerAddress } = req.query;
+  const { chainId, sellToken, buyToken, sellAmount, takerAddress } = req.query;
 
   console.log('[swap/quote] REQ:', { chainId, sellToken, buyToken, sellAmount, takerAddress: takerAddress || '(nenhum)' });
   console.log('[swap/quote] SELL AMOUNT WEI:', sellAmount, '| feeBps:', PLATFORM_FEE_BPS);
 
-  if (!sellToken || !buyToken || !sellAmount) {
-    return res.status(400).json({ error: 'Parâmetros obrigatórios: sellToken, buyToken, sellAmount' });
+  if (!chainId || !sellToken || !buyToken || !sellAmount) {
+    return res.status(400).json({ error: 'Parâmetros obrigatórios: chainId, sellToken, buyToken, sellAmount' });
   }
 
   // Input validation — prevent injection via URL params
@@ -613,7 +614,9 @@ app.get('/api/swap/quote', async (req, res) => {
   if (takerAddress && !ETH_ADDR.test(takerAddress))
     return res.status(400).json({ error: 'takerAddress inválido' });
 
-  const cid = parseInt(chainId) || 8453;
+  const cid = Number.parseInt(chainId, 10);
+  if (!Number.isInteger(cid))
+    return res.status(400).json({ error: `chainId inválido: ${chainId}` });
   if (!SUPPORTED_CHAINS.has(cid))
     return res.status(400).json({ error: `chainId ${cid} não suportado` });
 
@@ -631,7 +634,13 @@ app.get('/api/swap/quote', async (req, res) => {
       headers: { '0x-api-key': ZEROX_API_KEY, '0x-version': 'v2' },
       signal: AbortSignal.timeout(15_000),
     });
-    const body = await r.json();
+    const rawText = await r.text();
+    let body;
+    try {
+      body = rawText ? JSON.parse(rawText) : {};
+    } catch {
+      body = { raw: rawText };
+    }
 
     console.log('[swap/quote] 0x RESPONSE status:', r.status, '| liquidityAvailable:', body.liquidityAvailable);
 
@@ -641,11 +650,24 @@ app.get('/api/swap/quote', async (req, res) => {
         || body.reason
         || `Erro 0x API (${r.status})`;
       console.error('[swap/quote] 0x ERRO:', errMsg, '| body:', JSON.stringify(body).slice(0, 300));
-      return res.status(r.status < 500 ? 400 : 502).json({ error: errMsg });
+      return res.status(r.status < 500 ? 400 : 502).json({
+        error: errMsg,
+        upstreamStatus: r.status,
+        upstreamStatusText: r.statusText,
+        upstreamEndpoint: endpoint,
+        upstreamUrl: url,
+        upstreamBody: body,
+      });
     }
 
     if (body.liquidityAvailable === false) {
-      return res.status(400).json({ error: 'Liquidez insuficiente para este par nesta rede' });
+      return res.status(400).json({
+        error: 'Liquidez insuficiente para este par nesta rede',
+        upstreamStatus: r.status,
+        upstreamEndpoint: endpoint,
+        upstreamUrl: url,
+        upstreamBody: body,
+      });
     }
 
     console.log('[swap/quote] 0x OK | buyAmount:', body.buyAmount, '| minBuyAmount:', body.minBuyAmount, '| gas:', body.gas || body.transaction?.gas);

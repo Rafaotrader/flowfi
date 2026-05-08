@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useWallet } from '../../components/common/WalletProvider';
 import {
   getPositionsForAddress, collectPositionFees, closePosition,
-  getPositionLiquidityAmounts, readAccruedFees,
+  getPositionLiquidityAmounts, readAccruedFees, getPositionManagerAddress,
 } from '../../lib/web3';
 import { getTokenPricesUSD, toUSD, fmtUSD } from '../../lib/prices';
 import HarvestModal from '../../components/harvest/HarvestModal';
@@ -13,7 +13,7 @@ import HarvestModal from '../../components/harvest/HarvestModal';
 const CHAIN_EXPLORER = {
   1: 'https://etherscan.io', 8453: 'https://basescan.org',
   42161: 'https://arbiscan.io', 10: 'https://optimistic.etherscan.io',
-  137: 'https://polygonscan.com',
+  137: 'https://polygonscan.com', 56: 'https://bscscan.com',
 };
 const CHAIN_NAME = {
   1: 'Ethereum', 8453: 'Base', 42161: 'Arbitrum', 10: 'Optimism', 137: 'Polygon', 56: 'BNB',
@@ -110,7 +110,8 @@ function normalizeActive(raw) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function PositionsPage() {
-  const { address, chainId, connect } = useWallet();
+  const { address, activeChainId, chainId, connect } = useWallet();
+  const currentChainId = activeChainId || chainId || null;
 
   const [positions,         setPositions]         = useState([]);
   const [lastGoodPositions, setLastGoodPositions] = useState([]);
@@ -126,18 +127,35 @@ export default function PositionsPage() {
 
   const [posValues, setPosValues] = useState({});
   const [prices,    setPrices]    = useState({});
+  const loadSeqRef = useRef(0);
 
-  const explorer = CHAIN_EXPLORER[chainId] || 'https://basescan.org';
+  const explorer = CHAIN_EXPLORER[currentChainId] || null;
+
+  useEffect(() => {
+    loadSeqRef.current += 1;
+    setPositions([]);
+    setLastGoodPositions([]);
+    setHarvestPosition(null);
+    setError(null);
+    setTotalBalance(0);
+    setActionState({});
+    setPosValues({});
+    setPrices({});
+    setHasLoadedOnce(false);
+  }, [address, currentChainId]);
 
   // ── Load positions ─────────────────────────────────────────────────────────
 
   const loadPositions = useCallback((silent = false) => {
-    if (!address) return;
+    if (!address || !currentChainId) return;
+    const seq = ++loadSeqRef.current;
     if (!silent) { setIsLoading(true); setError(null); }
     else setIsSyncing(true);
 
-    getPositionsForAddress(address, chainId || 8453)
+    console.log('[positions] load', { activeChainId: currentChainId, walletChainId: chainId, address });
+    getPositionsForAddress(address, currentChainId)
       .then(({ positions: raw, totalBalance }) => {
+        if (seq !== loadSeqRef.current) return;
         const unique = normalizeActive(raw);
         setPositions(unique);
         setLastGoodPositions(unique);
@@ -146,12 +164,15 @@ export default function PositionsPage() {
         setLastRefresh(new Date());
       })
       .catch(err => {
+        if (seq !== loadSeqRef.current) return;
         console.warn('[positions] load error', err);
         if (!silent) setError(true);
         // On error: keep existing cards visible
       })
-      .finally(() => { setIsLoading(false); setIsSyncing(false); });
-  }, [address, chainId]);
+      .finally(() => {
+        if (seq === loadSeqRef.current) { setIsLoading(false); setIsSyncing(false); }
+      });
+  }, [address, currentChainId, chainId]);
 
   useEffect(() => { loadPositions(); }, [loadPositions]);
 
@@ -182,7 +203,7 @@ export default function PositionsPage() {
   // Keep stale values for known positions on refresh — prevents skeleton flash.
 
   useEffect(() => {
-    if (!positions.length) { setPosValues({}); return; }
+    if (!positions.length || !currentChainId) { setPosValues({}); return; }
 
     setPosValues(prev => {
       const next = {};
@@ -204,7 +225,7 @@ export default function PositionsPage() {
           // Real accrued fees via simulate collect() — falls back to tokensOwed on error
           let fees0 = 0, fees1 = 0;
           try {
-            const { amount0: a0, amount1: a1 } = await readAccruedFees(pos.tokenId, address, chainId || 8453);
+            const { amount0: a0, amount1: a1 } = await readAccruedFees(pos.tokenId, address, currentChainId);
             fees0 = Number(a0) / 10 ** pos.decimals0;
             fees1 = Number(a1) / 10 ** pos.decimals1;
           } catch {
@@ -231,7 +252,7 @@ export default function PositionsPage() {
           }
 
           try {
-            const { amount0, amount1, inRange } = await getPositionLiquidityAmounts(pos, chainId || 8453);
+            const { amount0, amount1, inRange } = await getPositionLiquidityAmounts(pos, currentChainId);
             const calcFailed = amount0 === 0 && amount1 === 0 && BigInt(pos.liquidity || '0') > 0n;
 
             let liqUSD = null;
@@ -296,7 +317,7 @@ export default function PositionsPage() {
         })();
       }
     });
-  }, [positions, chainId, address]);
+  }, [positions, currentChainId, address]);
 
   // ── Summary metrics ───────────────────────────────────────────────────────
 
@@ -323,6 +344,7 @@ export default function PositionsPage() {
   }
 
   async function handleCollect(pos) {
+    if (!currentChainId) return;
     const pv = posValues[pos.tokenId];
     const hasRealFees  = pv?.fees0 > 0 || pv?.fees1 > 0;
     const hasOwedFees  = BigInt(pos.tokensOwed0 || '0') > 0n || BigInt(pos.tokensOwed1 || '0') > 0n;
@@ -332,17 +354,18 @@ export default function PositionsPage() {
     }
     setPosAct(pos.tokenId, { step: 'collecting', hash: null, error: null });
     try {
-      const { hash } = await collectPositionFees(pos.tokenId, address, chainId || 8453);
+      const { hash } = await collectPositionFees(pos.tokenId, address, currentChainId);
       setPosAct(pos.tokenId, { step: 'collected', hash });
       loadPositions(true);
     } catch (err) { setPosAct(pos.tokenId, { step: 'error', error: parseErr(err) }); }
   }
 
   async function handleFinalize(pos) {
+    if (!currentChainId) return;
     if (!pos.hasLiquidity) return;
     setPosAct(pos.tokenId, { step: 'finalizing', hash: null, error: null });
     try {
-      const { hash } = await closePosition(pos.tokenId, pos.liquidity, address, chainId || 8453);
+      const { hash } = await closePosition(pos.tokenId, pos.liquidity, address, currentChainId);
       setPosAct(pos.tokenId, { step: 'finalized', hash });
       loadPositions(true);
     } catch (err) { setPosAct(pos.tokenId, { step: 'error', error: parseErr(err) }); }
@@ -371,7 +394,7 @@ export default function PositionsPage() {
         <div>
           <h1 className="text-3xl font-bold text-white">Minhas Posições</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {CHAIN_NAME[chainId] || 'Base'}
+            {CHAIN_NAME[currentChainId] || 'Rede não identificada'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -415,7 +438,7 @@ export default function PositionsPage() {
               <div className="skeleton-shimmer h-10 rounded-xl" />
             </div>
           ))}
-          <p className="text-center text-slate-600 text-sm">Sincronizando suas posições na {CHAIN_NAME[chainId] || 'Base'}…</p>
+          <p className="text-center text-slate-600 text-sm">Sincronizando suas posições na {CHAIN_NAME[currentChainId] || 'rede atual'}…</p>
         </div>
       )}
 
@@ -449,7 +472,7 @@ export default function PositionsPage() {
             <div className="flex items-start justify-between flex-wrap gap-3">
               <div>
                 <p className="text-[11px] text-violet-400 font-medium uppercase tracking-widest mb-1">
-                  Seu patrimônio — {CHAIN_NAME[chainId] || 'Base'}
+                  Seu patrimônio — {CHAIN_NAME[currentChainId] || 'rede atual'}
                 </p>
                 {!valuesReady ? (
                   <div className="space-y-1.5">
@@ -534,7 +557,7 @@ export default function PositionsPage() {
               localRecord={mintRecords[pos.tokenId]}
               prices={prices}
               explorer={explorer}
-              chainId={chainId}
+              chainId={currentChainId}
               onCollect={handleCollect}
               onFinalize={handleFinalize}
               onRetry={() => loadPositions(false)}
@@ -546,6 +569,8 @@ export default function PositionsPage() {
       {harvestPosition && (
         <HarvestModal
           position={harvestPosition}
+          chainId={currentChainId}
+          ownerAddress={address}
           onClose={() => setHarvestPosition(null)}
           onSuccess={() => { setHarvestPosition(null); loadPositions(true); }}
         />
@@ -559,7 +584,7 @@ export default function PositionsPage() {
 function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, onCollect, onFinalize, onRetry }) {
   // Partial card: positions() read failed
   if (pos.syncStatus === 'partial') {
-    const mgr = '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1';
+    const mgr = getPositionManagerAddress(chainId);
     return (
       <div className="card-hover space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -645,7 +670,7 @@ function PositionCard({ pos, pv, act, localRecord, prices, explorer, chainId, on
             <span>·</span>
             <span className="badge-neutral">{pos.feeTierLabel}</span>
             <span>·</span>
-            <span>{CHAIN_NAME[chainId] || 'Base'}</span>
+            <span>{CHAIN_NAME[chainId] || 'Rede atual'}</span>
             <a href={`${explorer}/token/${pos.token0 || ''}?a=${pos.tokenId}`}
                target="_blank" rel="noopener noreferrer"
                className="text-violet-500 hover:text-violet-400 hover:underline">

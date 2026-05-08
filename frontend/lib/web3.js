@@ -24,6 +24,12 @@ export const POSITION_MANAGER_BY_CHAIN = {
   8453:  '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
 };
 
+export function getPositionManagerAddress(chainId) {
+  const address = POSITION_MANAGER_BY_CHAIN[chainId];
+  if (!address) throw new Error(`Uniswap V3 PositionManager não disponível na rede ${chainId}.`);
+  return address;
+}
+
 // Mantido por compatibilidade
 export const UNISWAP_V3_POSITION_MANAGER = POSITION_MANAGER_BY_CHAIN[1];
 
@@ -226,6 +232,12 @@ export const SWAP_ROUTER_BY_CHAIN = {
   8453:  '0x2626664c2603336E57B271c5C0b26F421741e481',
 };
 
+function getKnownChain(chainId) {
+  const chain = CHAINS[chainId];
+  if (!chain) throw new Error(`Rede ${chainId} não suportada pelo Flowfy.`);
+  return chain;
+}
+
 export function priceToTick(price) {
   if (!price || price <= 0) return 0;
   return Math.floor(Math.log(price) / Math.log(1.0001));
@@ -267,8 +279,9 @@ export function resolveTokenMeta(address) {
 // ─── Clients ──────────────────────────────────────────────────────────────────
 
 export function getPublicClient(chainId = 8453) {
+  const chain = getKnownChain(chainId);
   return createPublicClient({
-    chain: CHAINS[chainId] || mainnet,
+    chain,
     transport: http(RPC_URLS[chainId] || RPC_URLS[1]),
   });
 }
@@ -276,9 +289,10 @@ export function getPublicClient(chainId = 8453) {
 // Uses MetaMask's own RPC when available — avoids public RPC rate-limits.
 // Falls back to getPublicClient when window.ethereum is absent (SSR / no wallet).
 export function getMetaMaskPublicClient(chainId = 8453) {
+  const chain = getKnownChain(chainId);
   if (typeof window !== 'undefined' && window.ethereum) {
     return createPublicClient({
-      chain: CHAINS[chainId] || mainnet,
+      chain,
       transport: custom(window.ethereum),
     });
   }
@@ -289,7 +303,7 @@ export async function getWalletClient(chainId = 8453) {
   if (typeof window === 'undefined' || !window.ethereum) {
     throw new Error('MetaMask não encontrado. Instale a extensão MetaMask.');
   }
-  const chain = CHAINS[chainId] || base;
+  const chain = getKnownChain(chainId);
   return createWalletClient({ chain, transport: custom(window.ethereum) });
 }
 
@@ -302,6 +316,7 @@ const CHAIN_FALLBACK_RPCS = {
   10:    ['https://mainnet.optimism.io',    'https://optimism-rpc.publicnode.com',     'https://rpc.ankr.com/optimism'],
   137:   ['https://polygon-rpc.com',        'https://polygon-bor-rpc.publicnode.com',  'https://rpc.ankr.com/polygon'],
   8453:  ['https://mainnet.base.org',       'https://base.llamarpc.com',               'https://base-rpc.publicnode.com'],
+  56:    ['https://bsc-dataseed.binance.org', 'https://bsc-rpc.publicnode.com',          'https://rpc.ankr.com/bsc'],
 };
 
 // Calls fn(publicClient) trying each RPC until one succeeds.
@@ -311,7 +326,7 @@ async function readWithFallback(fn, chainId = 8453) {
   let lastErr;
   for (const rpc of rpcs) {
     try {
-      const c = createPublicClient({ chain: CHAINS[chainId] || base, transport: http(rpc) });
+      const c = createPublicClient({ chain: getKnownChain(chainId), transport: http(rpc) });
       return await fn(c);
     } catch (err) {
       lastErr = err;
@@ -350,7 +365,7 @@ function parseRawPosition(raw, tokenId) {
 }
 
 export async function getPositionsForAddress(address, chainId = 8453) {
-  const nftAddr  = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr  = getPositionManagerAddress(chainId);
   const erc20Cli = getPublicClient(chainId);
 
   // ── Camada A: balance ──────────────────────────────────────────────────────
@@ -460,7 +475,7 @@ export async function getPositionsForAddress(address, chainId = 8453) {
 // ─── Fees acumuladas ──────────────────────────────────────────────────────────
 
 export async function readAccruedFees(tokenId, ownerAddress, chainId = 8453) {
-  const nftAddr = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr = getPositionManagerAddress(chainId);
 
   // Simulate collect() with the actual owner as account — Uniswap V3 checks isAuthorizedForToken(msg.sender, tokenId)
   if (ownerAddress) {
@@ -518,7 +533,7 @@ export async function authenticateWithWallet(address) {
 
 export async function checkNftApproval(tokenId, harvesterAddress, chainId = 8453) {
   const client  = getPublicClient(chainId);
-  const nftAddr = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr = getPositionManagerAddress(chainId);
 
   const [approved, owner] = await Promise.all([
     client.readContract({ address: nftAddr, abi: POSITION_MANAGER_ABI, functionName: 'getApproved',   args: [BigInt(tokenId)] }),
@@ -536,7 +551,7 @@ export async function checkNftApproval(tokenId, harvesterAddress, chainId = 8453
 export async function approveHarvester(tokenId, harvesterAddress, chainId = 8453) {
   const walletClient = await getWalletClient();
   const [account]    = await walletClient.getAddresses();
-  const nftAddr      = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr      = getPositionManagerAddress(chainId);
   const hash = await walletClient.writeContract({
     account, address: nftAddr, abi: POSITION_MANAGER_ABI,
     functionName: 'approve', args: [harvesterAddress, BigInt(tokenId)],
@@ -574,7 +589,7 @@ export async function approveERC20Token(tokenAddress, spender, amount, chainId =
   const hash = await walletClient.writeContract({
     account, address: tokenAddress, abi: ERC20_FULL_ABI,
     functionName: 'approve', args: [spender, amount ?? MAX],
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
   const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash });
   return { hash, receipt };
@@ -587,7 +602,7 @@ const MaxUint128 = 340282366920938463463374607431768211455n;
 export async function collectPositionFees(tokenId, recipientAddress, chainId = 8453) {
   const walletClient = await getWalletClient(chainId);
   const [account]    = await walletClient.getAddresses();
-  const nftAddr      = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr      = getPositionManagerAddress(chainId);
   const hash = await walletClient.writeContract({
     account,
     address: nftAddr,
@@ -599,7 +614,7 @@ export async function collectPositionFees(tokenId, recipientAddress, chainId = 8
       amount0Max: MaxUint128,
       amount1Max: MaxUint128,
     }],
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
   const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash });
   return { hash, receipt };
@@ -608,7 +623,7 @@ export async function collectPositionFees(tokenId, recipientAddress, chainId = 8
 export async function closePosition(tokenId, liquidityAmount, recipientAddress, chainId = 8453) {
   const walletClient = await getWalletClient(chainId);
   const [account]    = await walletClient.getAddresses();
-  const nftAddr      = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr      = getPositionManagerAddress(chainId);
   const recipient    = recipientAddress || account;
   const deadline     = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
@@ -625,7 +640,7 @@ export async function closePosition(tokenId, liquidityAmount, recipientAddress, 
       amount1Min: 0n,
       deadline,
     }],
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
   await getPublicClient(chainId).waitForTransactionReceipt({ hash: decHash });
 
@@ -641,7 +656,7 @@ export async function closePosition(tokenId, liquidityAmount, recipientAddress, 
       amount0Max: MaxUint128,
       amount1Max: MaxUint128,
     }],
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
   const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash: colHash });
   return { hash: colHash, receipt };
@@ -679,7 +694,7 @@ export async function addLiquidityToPool({
 }) {
   const walletClient = await getWalletClient(chainId);
   const [account] = await walletClient.getAddresses();
-  const nftAddr = POSITION_MANAGER_BY_CHAIN[chainId] || POSITION_MANAGER_BY_CHAIN[1];
+  const nftAddr = getPositionManagerAddress(chainId);
 
   // Sort tokens (Uniswap V3: token0 < token1 always)
   const t0lower = token0Addr.toLowerCase();
@@ -713,7 +728,7 @@ export async function addLiquidityToPool({
       amount0Min: 0n, amount1Min: 0n,
       recipient: account, deadline,
     }],
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
 
   const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash });
@@ -874,7 +889,7 @@ export async function executeUniswapV3Swap({ quote, sellToken, buyToken, sellAmo
       sqrtPriceLimitX96: 0n,
     }],
     value: isETHIn ? amountIn : 0n,
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
   const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash });
   return { hash, receipt };
@@ -889,7 +904,7 @@ export async function executeHarvest(tokenId, harvesterAddress, chainId = 8453) 
   const hash = await walletClient.writeContract({
     account, address: harvesterAddress, abi: HARVESTER_ABI,
     functionName: 'harvestWithFee', args: [BigInt(tokenId)],
-    chain: CHAINS[chainId] || base,
+    chain: getKnownChain(chainId),
   });
   const receipt = await getPublicClient(chainId).waitForTransactionReceipt({ hash });
   return { hash, receipt };

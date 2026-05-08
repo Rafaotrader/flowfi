@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import PoolCard from './PoolCard';
 import EnterPoolModal from './EnterPoolModal';
 import { useWallet } from '../common/WalletProvider';
@@ -9,7 +9,16 @@ const BASE_CHAIN_ID = 8453;
 export default function PoolRanking({ pools, onSimulate }) {
   const [enterPool, setEnterPool] = useState(null);
   const [switchError, setSwitchError] = useState(null);
-  const { chainId, isConnected, switchNetwork } = useWallet();
+  const { address, chainId, isConnected, switchNetwork } = useWallet();
+
+  useEffect(() => {
+    setEnterPool(null);
+    setSwitchError(null);
+  }, [address, chainId, isConnected]);
+
+  useEffect(() => {
+    setEnterPool(null);
+  }, [pools]);
 
   async function handleEnterPool(pool) {
     const targetChain = Number(pool?.chainId || pool?.networkId || BASE_CHAIN_ID);
