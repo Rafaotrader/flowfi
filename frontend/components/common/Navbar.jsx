@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { href: '/',          label: 'Dashboard' },
   { href: '/pools',     label: 'Pools'     },
   { href: '/swap',      label: 'Swap'      },
+  { href: '/bridge',    label: 'Bridge'    },
   { href: '/simulator', label: 'Simulador' },
   { href: '/positions', label: 'Posições'  },
 ];

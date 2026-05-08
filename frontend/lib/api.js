@@ -136,3 +136,5 @@ export const getSwapQuoteEndpoint = (params) => {
   const q = new URLSearchParams(params).toString();
   return `${BASE_URL}/api/swap/quote?${q}`;
 };
+
+export const getBridgeQuoteEndpoint = () => `${BASE_URL}/api/bridge/quote`;

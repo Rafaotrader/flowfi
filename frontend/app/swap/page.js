@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import { useWallet } from '../../components/common/WalletProvider';
 import { getSwapQuote, getSwapQuoteEndpoint } from '../../lib/api';
 import {
@@ -986,8 +987,11 @@ export default function SwapPage() {
 
         {/* L2 suggestion when on mainnet */}
         {currentChainId === 1 && quote && (
-          <div className="rounded-xl p-3 text-xs border border-amber-800/30 bg-amber-950/20 text-amber-400">
-            Você está na Ethereum mainnet (gas alto). Troque para Base, Arbitrum ou Optimism para pagar menos gas.
+          <div className="rounded-xl p-3 text-xs border border-amber-800/30 bg-amber-950/20 text-amber-400 space-y-2">
+            <p>Você está na Ethereum Mainnet. Para pagar menos gas, envie fundos para Base, Arbitrum, Optimism ou Solana.</p>
+            <Link href="/bridge" className="inline-flex items-center rounded-lg border border-amber-700/50 px-3 py-1.5 font-semibold text-amber-200 hover:border-amber-500">
+              Trocar de rede / Fazer bridge
+            </Link>
           </div>
         )}
 

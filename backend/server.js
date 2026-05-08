@@ -730,6 +730,74 @@ app.get('/api/swap/quote', async (req, res) => {
 
 // ─── Auth mock ───────────────────────────────────────────────────────────────
 
+app.post('/api/bridge/quote', express.json(), async (req, res) => {
+  const {
+    fromChain,
+    toChain,
+    fromToken,
+    toToken,
+    amountRaw,
+    evmAddress,
+    solanaAddress,
+  } = req.body || {};
+
+  console.log('[bridge/quote] REQ:', {
+    fromChain,
+    toChain,
+    fromToken: fromToken?.symbol,
+    toToken: toToken?.symbol,
+    amountRaw,
+    evmAddress: evmAddress ? `${evmAddress.slice(0, 6)}...${evmAddress.slice(-4)}` : null,
+    solanaAddress: solanaAddress ? `${solanaAddress.slice(0, 6)}...${solanaAddress.slice(-4)}` : null,
+  });
+
+  if (!fromChain || !toChain || !fromToken || !toToken || !amountRaw) {
+    return res.status(400).json({
+      error: 'Parâmetros obrigatórios: fromChain, toChain, fromToken, toToken, amountRaw',
+    });
+  }
+
+  const usesSolana = fromChain === 'solana-mainnet' || toChain === 'solana-mainnet';
+
+  return res.status(501).json({
+    error: usesSolana
+      ? 'Bridge com Solana em preparação. Esta rota exige integração com provedor compatível.'
+      : 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.',
+    message: usesSolana
+      ? 'Bridge com Solana em preparação. Esta rota exige integração com provedor compatível.'
+      : 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.',
+    fromChain,
+    toChain,
+    fromToken,
+    toToken,
+    amountRaw,
+    estimatedAmountOut: null,
+    platformFee: null,
+    netAmountOut: null,
+    gasCost: null,
+    bridgeProvider: usesSolana ? 'LI.FI + Mayan/Wormhole/Jupiter recomendado' : 'LI.FI/Socket/Across recomendado',
+    route: null,
+    estimatedTime: null,
+    warnings: [
+      'Nenhuma transação será criada até uma integração de bridge real ser conectada.',
+      'Operações cross-chain exigem confirmação explícita na carteira do usuário.',
+    ],
+    providerConfig: {
+      lifiConfigured: Boolean(process.env.LIFI_API_KEY),
+      socketConfigured: Boolean(process.env.SOCKET_API_KEY),
+      mayanConfigured: Boolean(process.env.MAYAN_API_KEY),
+      solanaRpcConfigured: Boolean(process.env.SOLANA_RPC_URL),
+    },
+  });
+});
+
+app.post('/api/bridge/execute', express.json(), async (_req, res) => {
+  return res.status(501).json({
+    error: 'Execução de bridge ainda não implementada.',
+    message: 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.',
+  });
+});
+
 app.get('/api/auth/nonce/:walletAddress', (req, res) => {
   const nonce = Math.floor(Math.random() * 1_000_000).toString();
   res.json({ nonce, message: `Assine esta mensagem para autenticar no Flowfy.\nNonce: ${nonce}` });
