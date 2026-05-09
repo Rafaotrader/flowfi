@@ -35,7 +35,7 @@ export function getBridgeRouteStatus({ fromChainId, toChainId, solanaAddress }) 
   if (isSolanaRoute(fromChain.id, toChain.id)) {
     return { ok: false, message: 'Bridge com Solana em preparação. Esta rota exige integração com provedor compatível.' };
   }
-  return { ok: false, message: 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.' };
+  return { ok: false, message: 'Bridge EVM em preparação. Integração com LI.FI/Socket/Across necessária.' };
 }
 
 export async function getBridgeQuote(params) {

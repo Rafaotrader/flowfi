@@ -762,10 +762,10 @@ app.post('/api/bridge/quote', express.json(), async (req, res) => {
   return res.status(501).json({
     error: usesSolana
       ? 'Bridge com Solana em preparação. Esta rota exige integração com provedor compatível.'
-      : 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.',
+      : 'Bridge EVM em preparação. Integração com LI.FI/Socket/Across necessária.',
     message: usesSolana
       ? 'Bridge com Solana em preparação. Esta rota exige integração com provedor compatível.'
-      : 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.',
+      : 'Bridge EVM em preparação. Integração com LI.FI/Socket/Across necessária.',
     fromChain,
     toChain,
     fromToken,
@@ -794,7 +794,7 @@ app.post('/api/bridge/quote', express.json(), async (req, res) => {
 app.post('/api/bridge/execute', express.json(), async (_req, res) => {
   return res.status(501).json({
     error: 'Execução de bridge ainda não implementada.',
-    message: 'Bridge real em preparação. Integração com LI.FI/Socket/Across necessária.',
+    message: 'Bridge EVM em preparação. Integração com LI.FI/Socket/Across necessária.',
   });
 });
 
